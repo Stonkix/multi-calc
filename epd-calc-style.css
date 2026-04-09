@@ -1,0 +1,819 @@
+:root {
+    --primary: #7C39BF;
+    --secondary: #C580F2;
+    --accent: #DAA0F2;
+    --bg-light: #E1D5F2;
+    --bg-gray: #F2F2F2;
+    --white: #ffffff;
+    --text: #444;
+}
+
+* { 
+    box-sizing: border-box; 
+    -webkit-font-smoothing: antialiased; 
+}
+
+body {
+    margin: 0;
+    padding: 20px;
+    background: var(--bg-gray);
+    font-family: 'Montserrat', sans-serif;
+    color: var(--text);
+}
+
+.page-title {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.page-title h1 {
+    color: var(--primary);
+    margin: 0 0 10px 0;
+    font-size: 32px;
+}
+
+.page-title p {
+    color: #888;
+    font-size: 16px;
+    margin: 0;
+}
+
+.calculator {
+    max-width: 850px;
+    margin: 20px auto;
+    padding: 30px;
+    background: var(--white);
+    border-radius: 28px;
+    box-shadow: 0 10px 30px rgba(124, 57, 191, 0.1);
+}
+
+.form-row {
+    margin-bottom: 20px;
+}
+
+.form-row label {
+    display: block;
+    margin-bottom: 10px;
+    font-weight: 600;
+    color: var(--primary);
+}
+
+.input-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: var(--text);
+    font-size: 14px;
+}
+
+.input-group input[type="number"] {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #eee;
+    border-radius: 10px;
+    font-size: 16px;
+    font-family: inherit;
+    transition: border-color 0.3s;
+}
+
+.input-group input[type="number"]:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+/* Сетка для карточек */
+.sig-grid, .mchd-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.sig-card, .mchd-card {
+    background: #fff;
+    border: 2px solid #eee;
+    border-radius: 20px;
+    padding: 20px;
+    transition: all 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.sig-card:hover, .mchd-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(124, 57, 191, 0.1);
+}
+
+.sig-card.locked { 
+    opacity: 0.5; 
+    pointer-events: none;
+}
+
+.sig-card.active, .mchd-card.active {
+    border-color: var(--primary);
+    background: #faf8fc;
+}
+
+.mchd-desc {
+    font-size: 12px;
+    color: #888;
+    margin: 5px 0;
+}
+
+.mchd-input {
+    margin-top: 10px;
+}
+
+.sig-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.sig-header strong {
+    color: var(--primary);
+    font-size: 15px;
+}
+
+/* --- ПЕРЕКЛЮЧАТЕЛЬ (SWITCH) --- */
+.custom-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+}
+
+.custom-switch input { 
+    opacity: 0; 
+    width: 0; 
+    height: 0; 
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; 
+    left: 0; 
+    right: 0; 
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+    border-radius: 24px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 18px; 
+    width: 18px;
+    left: 3px; 
+    bottom: 3px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+input:checked + .slider { 
+    background-color: var(--primary); 
+}
+
+input:checked + .slider:before { 
+    transform: translateX(20px); 
+}
+
+input:disabled + .slider {
+    background-color: #ddd;
+    cursor: not-allowed;
+}
+
+/* --- ОСТАЛЬНЫЕ СТИЛИ --- */
+.grid-adaptive { 
+    display: grid; 
+    grid-template-columns: 1fr 1fr; 
+    gap: 20px; 
+}
+
+.toggle-group { 
+    display: flex; 
+    background: var(--bg-gray); 
+    padding: 5px; 
+    border-radius: 14px; 
+    gap: 5px; 
+}
+
+.toggle-btn { 
+    flex: 1; 
+    border: none; 
+    padding: 12px; 
+    border-radius: 10px; 
+    cursor: pointer; 
+    font-weight: 600; 
+    font-family: inherit;
+    background: transparent; 
+    color: #7f8c8d; 
+    transition: 0.3s;
+}
+
+.toggle-btn.selected { 
+    background: var(--primary); 
+    color: #fff; 
+}
+
+.toggle-btn:hover:not(.selected) {
+    background: rgba(124, 57, 191, 0.1);
+}
+
+.qty-input, .price-input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    text-align: center;
+    font-family: inherit;
+}
+
+.qty-input.fixed-width {
+    width: 80px;
+}
+
+.total-bar {
+    background: var(--primary);
+    padding: 20px;
+    border-radius: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: white;
+    cursor: pointer;
+    margin-top: 30px;
+    transition: all 0.3s;
+}
+
+.total-bar:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(124, 57, 191, 0.3);
+}
+
+.kp-label {
+    font-size: 18px;
+    font-weight: 700;
+    display: block;
+}
+
+.kp-subtitle {
+    font-size: 12px;
+    opacity: 0.9;
+    display: block;
+    margin-top: 5px;
+}
+
+.total-amount {
+    font-size: 28px;
+}
+
+.placeholder-text {
+    text-align: center;
+    padding: 40px;
+    color: #aaa;
+    font-size: 16px;
+}
+
+.content-area {
+    min-height: 100px;
+    margin-top: 20px;
+}
+
+/* Стили для карточки тарифа */
+.tariff-card {
+    background: linear-gradient(135deg, #f8f5fc 0%, #ffffff 100%);
+    border: 2px solid var(--bg-light);
+    border-radius: 20px;
+    padding: 25px;
+    margin-top: 20px;
+}
+
+.tariff-card.individual-mode {
+    border-color: var(--accent);
+    background: linear-gradient(135deg, #faf8fc 0%, #ffffff 100%);
+}
+
+.tariff-header {
+    margin-bottom: 20px;
+}
+
+.tariff-label {
+    display: inline-block;
+    background: var(--primary);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.individual-mode .tariff-label {
+    background: var(--secondary);
+}
+
+.tariff-title {
+    margin: 10px 0 0 0;
+    color: var(--primary);
+    font-size: 22px;
+}
+
+.detailing-section {
+    margin-top: 15px;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.detail-row > strong,
+.detail-row > .price-edit-block {
+    flex-shrink: 0;
+}
+
+.detail-row.highlight {
+    background: #faf8fc;
+    padding: 12px 15px;
+    border-radius: 10px;
+    border: none;
+    margin: 10px 0;
+}
+
+/* FIX 5: Убрана ракета и обводка */
+.detail-row.project-row {
+    background: linear-gradient(135deg, #f3ecff 0%, #faf8fc 100%);
+    padding: 12px 15px;
+    border-radius: 10px;
+    border: none;
+    margin: 10px 0;
+}
+
+.detail-row.project-row span {
+    color: var(--primary);
+    font-weight: 600;
+}
+
+.detail-row.project-row strong {
+    color: var(--primary);
+}
+
+.price-edit-block {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+/* Единый стиль для всех редактируемых полей в карточке тарифа */
+.tariff-field-input {
+    width: 110px;
+    padding: 8px 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 14px;
+    background: #ffffff;
+    transition: border-color 0.3s, box-shadow 0.3s;
+    font-family: inherit;
+}
+
+.tariff-field-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(124, 57, 191, 0.1);
+}
+
+/* Оставляем inline-edit для обратной совместимости */
+.inline-edit {
+    width: 110px;
+    padding: 8px 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    text-align: center;
+    font-weight: 600;
+    background: #ffffff;
+    transition: all 0.3s;
+    font-family: inherit;
+}
+
+.inline-edit:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(124, 57, 191, 0.1);
+}
+
+.unit-text {
+    font-size: 14px;
+    color: #888;
+}
+
+.extra-services-section {
+    margin-top: 25px;
+    background: #fff;
+    border: 2px solid var(--bg-light);
+    border-radius: 20px;
+    padding: 20px;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.extra-services-section.active {
+    border-color: var(--primary);
+    box-shadow: 0 8px 20px rgba(124, 57, 191, 0.1);
+}
+
+.extra-services-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.extra-services-title {
+    margin: 0;
+    color: var(--primary);
+    font-size: 18px;
+}
+
+.extra-services-subtitle {
+    margin: 6px 0 0;
+    color: #888;
+    font-size: 13px;
+}
+
+.extra-service-add-btn,
+.extra-service-remove-btn {
+    border: none;
+    border-radius: 10px;
+    font-family: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.2s ease;
+}
+
+.extra-service-add-btn {
+    background: var(--primary);
+    color: #fff;
+    padding: 12px 16px;
+}
+
+.extra-service-add-btn-wide {
+    display: block;
+    width: 100%;
+    margin-top: 14px;
+}
+
+.extra-service-add-btn:hover,
+.extra-service-remove-btn:hover {
+    transform: translateY(-1px);
+}
+
+.extra-service-remove-btn {
+    background: #f7efff;
+    color: var(--primary);
+    padding: 10px 12px;
+}
+
+.extra-service-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) 120px 140px 110px;
+    gap: 10px;
+    align-items: center;
+}
+
+.extra-service-grid-head {
+    margin-top: 18px;
+    margin-bottom: 10px;
+    color: #8c8c8c;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    align-items: end;
+}
+
+.extra-service-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.extra-service-row {
+    padding: 12px;
+    border: 1px solid #eee;
+    border-radius: 14px;
+    background: #fcfbfe;
+}
+
+.extra-service-input {
+    width: 100%;
+    padding: 11px 12px;
+    border: 2px solid #eee;
+    border-radius: 10px;
+    font-family: inherit;
+    font-size: 14px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.extra-service-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(124, 57, 191, 0.1);
+}
+
+.extra-service-number {
+    text-align: center;
+}
+
+.extra-services-empty {
+    margin-top: 16px;
+    padding: 16px;
+    border-radius: 12px;
+    background: #faf8fc;
+    color: #777;
+    font-size: 14px;
+}
+
+/* Адаптив */
+@media (max-width: 600px) {
+    .grid-adaptive, .sig-grid, .mchd-grid { 
+        grid-template-columns: 1fr; 
+    }
+    .total-bar { 
+        flex-direction: column; 
+        text-align: center; 
+        gap: 15px; 
+    }
+    .extra-service-grid {
+        grid-template-columns: 1fr;
+    }
+    .extra-service-grid-head {
+        display: none;
+    }
+}
+
+/* Контейнер для доп. услуг */
+#addons-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+    margin-top: 25px;
+}
+
+.section-title {
+    grid-column: 1 / -1;
+    color: var(--primary);
+    margin: 0 0 10px 0;
+    font-size: 20px;
+}
+
+.addon-card {
+    background: #fff;
+    border: 2px solid #eee;
+    border-radius: 20px;
+    padding: 20px;
+    transition: all 0.3s ease;
+    display: flex;
+    flex-direction: column;
+}
+
+.addon-card.active {
+    border-color: var(--primary);
+    box-shadow: 0 8px 20px rgba(124, 57, 191, 0.1);
+}
+
+.addon-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.addon-title {
+    font-weight: 700;
+    color: var(--primary);
+    font-size: 15px;
+}
+
+/* Строки с выбором вариантов внутри допа */
+.variant-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-top: 1px solid #f9f9f9;
+    font-size: 13px;
+}
+
+.variant-row.kep-row {
+    padding: 10px 0;
+}
+
+.v-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.variant-text {
+    flex: 1;
+    min-width: 0;
+    padding-right: 8px;
+}
+
+.v-label {
+    color: var(--text);
+    display: block;
+}
+
+.variant-meta {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    color: #8a6db0;
+    line-height: 1.4;
+}
+
+.variant-row-hourly .unit-text {
+    color: var(--primary);
+    font-weight: 600;
+}
+
+.variant-row-placeholder .variant-meta {
+    color: #9b7c42;
+}
+
+/* Анимация появления */
+.animated-fade {
+    animation: fadeIn 0.4s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Стили для кастомных цен */
+.custom-price-summary {
+    font-size: 11px;
+    color: var(--primary);
+    cursor: pointer;
+    font-weight: 600;
+    padding: 8px 0;
+    user-select: none;
+    transition: color 0.3s;
+}
+
+.custom-price-summary:hover {
+    color: var(--secondary);
+}
+
+.custom-price-content {
+    margin-top: 10px;
+    background: #faf8fc;
+    padding: 15px;
+    border-radius: 12px;
+    border: 1px solid var(--bg-light);
+}
+
+.custom-price-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px dashed #e5d9f2;
+    font-size: 13px;
+}
+
+.custom-price-row:last-child {
+    border-bottom: none;
+}
+
+.custom-price-row span {
+    color: var(--text);
+    flex: 1;
+}
+
+.custom-price-input {
+    width: 90px;
+    padding: 6px 10px;
+    border: 2px solid var(--accent);
+    border-radius: 8px;
+    text-align: right;
+    font-weight: 600;
+    background: #ffffff;
+    font-family: inherit;
+    transition: all 0.3s;
+}
+
+.custom-price-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    background: #fdfbff;
+    box-shadow: 0 0 0 3px rgba(124, 57, 191, 0.1);
+}
+
+.custom-price-input::placeholder {
+    color: #aaa;
+    font-weight: 400;
+}
+
+/* Стили для выпадающих списков внутри карточек */
+.card-price-details {
+    border-top: 1px solid #eee;
+    padding-top: 10px;
+}
+
+.card-price-details > summary {
+    list-style: none;
+    outline: none;
+}
+
+.card-price-details > summary::-webkit-details-marker {
+    display: none;
+}
+
+.card-price-details[open] > summary {
+    margin-bottom: 5px;
+}
+
+/* Адаптация для маленьких карточек */
+.sig-card .custom-price-content,
+.mchd-card .custom-price-content {
+    padding: 12px;
+}
+
+.sig-card .custom-price-row,
+.mchd-card .custom-price-row {
+    padding: 8px 0;
+    font-size: 12px;
+}
+
+.sig-card .custom-price-input,
+.mchd-card .custom-price-input {
+    width: 70px;
+    padding: 5px 8px;
+    font-size: 13px;
+}
+
+/* Стили для полей внутри карточки КЦР */
+#kcr-options-container {
+    border-top: 1px solid #eee;
+    padding-top: 10px;
+    margin-top: 10px;
+}
+
+#kcr-options-container .variant-row {
+    padding: 8px 0;
+    font-size: 13px;
+}
+
+#kcr-options-container .kep-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#kcr-options-container .kep-row span {
+    flex: 1;
+    color: var(--text);
+}
+
+#kcr-options-container .qty-input {
+    width: 70px;
+    padding: 6px 8px;
+    border: 1.5px solid #eee;
+    border-radius: 6px;
+    text-align: center;
+    font-weight: 600;
+    transition: all 0.3s;
+}
+
+#kcr-options-container .qty-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    background: #fdfbff;
+}
+
+/* FIX 4: Стиль для поля редактирования кол-ва документов */
+.inline-edit[data-type="docs-count"] {
+    width: 100px;
+}

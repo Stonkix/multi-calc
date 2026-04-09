@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Помощник подбора тарифов 1С-ЭПД</title>
+    <link rel="icon" href="data:,">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="epd-calc-style.css">
+</head>
+<body>
+    <header class="page-title">
+        <h1>Помощник подбора тарифов 1С-ЭПД</h1>
+        <p>Рассчитайте стоимость подключения за несколько кликов</p>
+    </header>
+
+    <div class="calculator">
+        <div class="form-row">
+            <label>Выберите тип решения:</label>
+            <div class="toggle-group" id="main-mode-toggle">
+                <button class="toggle-btn selected" data-click="set-mode" data-val="typical">1С-ЭПД:Типовое решение</button>
+                <button class="toggle-btn" data-click="set-mode" data-val="project">1С-ЭПД:Проектное решение</button>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <label>Вариант расчета:</label>
+            <div class="toggle-group" id="sub-mode-toggle">
+                <button class="toggle-btn selected" data-click="set-submode" data-val="standard">Стандартный расчёт</button>
+                <button class="toggle-btn" data-click="set-submode" data-val="individual">Индивидуальный расчёт</button>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="grid-adaptive">
+                <div class="input-group">
+                    <label for="docs-month">Количество документов в месяц</label>
+                    <input type="number" id="docs-month" placeholder="0" min="0" data-action="docs-month">
+                </div>
+                <div class="input-group">
+                    <label for="docs-year">Количество документов в год</label>
+                    <input type="number" id="docs-year" placeholder="0" min="0" data-action="docs-year">
+                </div>
+            </div>
+        </div>
+
+        <div id="dynamic-content" class="content-area">
+            <div class="placeholder-text">
+                Здесь будут параметры тарифа... <br>
+                <strong>Введите количество документов</strong>
+            </div>
+        </div>
+
+        <div id="signatures-section" style="margin-top: 25px;">
+            <h3 style="color: var(--primary); margin-bottom: 15px;">Электронные подписи</h3>
+            <div class="addon-card" style="border: 2px solid var(--bg-light);">
+                <div style="margin-bottom: 20px;">
+                    <label style="font-weight: 600; color: var(--primary);">Общее кол-во сотрудников:</label>
+                    <input type="number" id="ukep-qty" class="qty-input" style="width: 100px; margin-left: 10px;" min="0" placeholder="0" data-action="ukep-qty">
+                </div>
+
+                <div class="sig-grid">
+                    <div id="card-basis" class="sig-card">
+                        <div class="sig-header">
+                            <strong>УКЭП Базис</strong>
+                            <label class="custom-switch">
+                                <input type="checkbox" id="check-basis" data-action="toggle-sig" data-val="basis">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div id="ukep-periods" class="toggle-group" style="font-size: 12px;">
+                            <button data-click="set-ukep-period" data-val="12" class="toggle-btn selected">12 месяцев</button>
+                            <button data-click="set-ukep-period" data-val="15" class="toggle-btn">15 месяцев</button>
+                        </div>
+                        <div id="basis-pricing-container"></div>
+                    </div>
+
+                    <div id="card-kcr" class="sig-card locked">
+                        <div class="sig-header">
+                            <strong>КЦР</strong>
+                            <label class="custom-switch">
+                                <input type="checkbox" id="check-kcr" data-action="toggle-sig" data-val="kcr">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <small>Доступно от 6 сотрудников</small>
+                        <div id="kcr-options-container" style="display: none; margin-top: 10px;">
+                            <div class="variant-row kep-row"><span>КЭП ЕГАИС:</span><input type="number" class="qty-input fixed-width" min="0" placeholder="0" data-action="kcr-qty" data-field="egais"></div>
+                            <div class="variant-row kep-row"><span>КЭП Универс.:</span><input type="number" class="qty-input fixed-width" min="0" placeholder="0" data-action="kcr-qty" data-field="univ"></div>
+                            <div class="variant-row kep-row"><span>КЭП Базис:</span><input type="number" class="qty-input fixed-width" min="0" placeholder="0" data-action="kcr-qty" data-field="basis"></div>
+                        </div>
+                        <div id="kcr-pricing-container"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="mchd-section" style="margin-top: 25px;">
+            <h3 style="color: #7C39BF; margin-bottom: 15px;">Машиночитаемые доверенности</h3>
+            <div class="mchd-grid" style="align-items: stretch;">
+                <div class="mchd-card" id="card-mchd-base" style="display:flex;flex-direction:column;">
+                    <div class="sig-header">
+                        <strong>Базовый</strong>
+                        <label class="custom-switch">
+                            <input type="checkbox" id="check-mchd-base" data-action="toggle-mchd" data-type="base">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <p class="mchd-desc">5 МЧД для одной организации.</p>
+                    <input type="number" class="qty-input mchd-input" style="margin-top:auto;" id="input-mchd-base" min="0" placeholder="0" data-action="mchd-qty" data-type="base">
+                    <div id="mchd-base-pricing-container"></div>
+                </div>
+
+                <div class="mchd-card" id="card-mchd-ext" style="display:flex;flex-direction:column;">
+                    <div class="sig-header">
+                        <strong>Расширенный</strong>
+                        <label class="custom-switch">
+                            <input type="checkbox" id="check-mchd-ext" data-action="toggle-mchd" data-type="ext">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <p class="mchd-desc">5 МЧД для разных организаций</p>
+                    <input type="number" class="qty-input mchd-input" style="margin-top:auto;" id="input-mchd-ext" min="0" placeholder="0" data-action="mchd-qty" data-type="ext">
+                    <div id="mchd-ext-pricing-container"></div>
+                </div>
+
+                <div class="mchd-card" id="card-mchd-single" style="display:flex;flex-direction:column;">
+                    <div class="sig-header">
+                        <strong>Одна МЧД</strong>
+                        <label class="custom-switch">
+                            <input type="checkbox" id="check-mchd-single" data-action="toggle-mchd" data-type="single">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <p class="mchd-desc">Выпуск специалистом</p>
+                    <input type="number" class="qty-input mchd-input" style="margin-top:auto;" id="input-mchd-single" min="0" placeholder="0" data-action="mchd-qty" data-type="single">
+                    <div id="mchd-single-pricing-container"></div>
+                </div>
+
+                <div class="mchd-card" id="card-mchd-extra" style="display:flex;flex-direction:column;">
+                    <div class="sig-header">
+                        <strong>Доп. МЧД</strong>
+                        <label class="custom-switch">
+                            <input type="checkbox" id="check-mchd-extra" data-action="toggle-mchd" data-type="extra">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <p class="mchd-desc">Покупка в ЛК</p>
+                    <input type="number" class="qty-input mchd-input" style="margin-top:auto;" id="input-mchd-extra" min="0" placeholder="0" data-action="mchd-qty" data-type="extra">
+                    <div id="mchd-extra-pricing-container"></div>
+                </div>
+
+                <div class="mchd-card" id="card-mchd-start" style="display:flex;flex-direction:column;">
+                    <div class="sig-header">
+                        <strong>Старт МЧД</strong>
+                        <label class="custom-switch">
+                            <input type="checkbox" id="check-mchd-start" data-action="toggle-mchd" data-type="start">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <p class="mchd-desc">Старт работы с МЧД в сервисе Астрал Доверенность</p>
+                    <input type="number" class="qty-input mchd-input" style="margin-top:auto;" id="input-mchd-start" min="0" placeholder="0" data-action="mchd-qty" data-type="start">
+                    <div id="mchd-start-pricing-container"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="addons-container"></div>
+
+        <div class="extra-services-section" id="extra-services-card">
+            <div class="extra-services-header">
+                <div>
+                    <h3 class="extra-services-title">Добавление прочих услуг</h3>
+                </div>
+                <label class="custom-switch">
+                    <input type="checkbox" id="check-extra-services" data-action="toggle-extra-services">
+                    <span class="slider round"></span>
+                </label>
+            </div>
+            <div id="extra-services-content" style="display:none;">
+                <div id="extra-services-list"></div>
+                <button type="button" class="extra-service-add-btn extra-service-add-btn-wide" data-click="add-extra-service">+ Добавить строку</button>
+            </div>
+        </div>
+        
+        <div class="details-area" style="margin-top: 25px; padding: 15px; background: #fcfcfc; border-radius: 12px; border-left: 4px solid #7C39BF;">
+            <div style="font-weight: 700; font-size: 11px; margin-bottom: 5px; color: #999; text-transform: uppercase; letter-spacing: 0.5px;">Детализация:</div>
+            <div id="details-content" style="font-size: 14px; white-space: pre-line; color: #444; line-height: 1.6;">
+                Введите данные для расчета...
+            </div>
+        </div>
+
+        <!-- Блок контактных данных -->
+        <div class="contact-block" style="margin-top: 25px; background: #fff; border: 2px solid var(--bg-light); border-radius: 20px; padding: 25px;">
+            <h3 style="color: var(--primary); margin: 0 0 20px 0; font-size: 18px;">Контактные данные для КП</h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div>
+                    <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Ваше ФИО</label>
+                    <input type="text" id="partner-name" placeholder="Иванов Иван Иванович" 
+                           style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px; transition: border-color 0.3s;"
+                           onfocus="this.style.borderColor='#7C39BF'" 
+                           onblur="this.style.borderColor='#eee'">
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Название компании клиента</label>
+                    <input type="text" id="client-name" placeholder="ООО «Компания»" 
+                           style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px; transition: border-color 0.3s;"
+                           onfocus="this.style.borderColor='#7C39BF'" 
+                           onblur="this.style.borderColor='#eee'">
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Телефон партнера</label>
+                    <input type="tel" id="partner-phone" placeholder="+7 (900) 000-00-00" 
+                           style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px; transition: border-color 0.3s;"
+                           onfocus="this.style.borderColor='#7C39BF'" 
+                           onblur="this.style.borderColor='#eee'">
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Email партнера</label>
+                    <input type="email" id="partner-email" placeholder="partner@company.ru" 
+                           style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px; transition: border-color 0.3s;"
+                           onfocus="this.style.borderColor='#7C39BF'" 
+                           onblur="this.style.borderColor='#eee'">
+                </div>
+            </div>
+        </div>
+
+        <div class="kp-container" onclick="window.downloadKPEPD && window.downloadKPEPD()">
+            <div class="total-bar">
+                <div class="total-info">
+                    <span class="kp-label">Скачать коммерческое предложение</span>
+                    <span class="kp-subtitle">Нажмите, чтобы сохранить расчет в PDF</span>
+                </div>
+                <div class="total-amount">
+                    <strong id="total-price">0 ₽</strong>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="epd-calc-script.js"></script>
+</body>
+</html>

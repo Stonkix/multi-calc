@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Помощник подбора тарифов</title>
+    <link rel="icon" href="data:,">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <script>
+        window.__CALC_APP_RESOURCES = {
+            styles: ['1co-calc-style.css', 'epd-calc-style.css', 'ikedo-calc-style.css'],
+            scripts: ['1co-calc-script.js', 'epd-calc-script.js', 'ikedo-calc-script.js'],
+            prices: {
+                '1co': ['1co-tariffs.json'],
+                'epd': ['epd-tariffs.json'],
+                'ikedo': ['iKedo-tafiffs.json']
+            }
+        };
+        window.__CALC_PRELOADED_DATA = Object.create(null);
+    </script>
+
+    <script>
+        // Подключение статики (CSS) централизовано из главного index.html
+        (function attachCalcStyles() {
+            const styles = (window.__CALC_APP_RESOURCES && window.__CALC_APP_RESOURCES.styles) || [];
+            styles.forEach((href) => {
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = href;
+                document.head.appendChild(link);
+            });
+        })();
+    </script>
+
+    <!-- Общие библиотеки — грузятся один раз для всех калькуляторов -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+
+        /* ── Шапка-переключатель ── */
+        .switcher-header {
+            background: transparent;
+            padding: 20px 24px 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .switcher-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: #999;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            margin-bottom: 14px;
+        }
+
+        .switcher-tabs {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .switcher-tab {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 22px;
+            border-radius: 12px;
+            border: 1.5px solid #e0e0e0;
+            background: #fff;
+            color: #888;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.18s ease;
+            user-select: none;
+        }
+
+        .switcher-tab:hover { background: #f7f7f7; color: #555; }
+
+        .switcher-tab .dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .switcher-tab.active { font-weight: 700; background: #fff; }
+        .switcher-tab[data-calc="1co"].active  { color: #FF5D5B; border-color: #FF5D5B; }
+        .switcher-tab[data-calc="epd"].active  { color: #7C39BF; border-color: #7C39BF; }
+        .switcher-tab[data-calc="ikedo"].active { color: #195fa6; border-color: #195fa6; }
+
+        /* ── Панели калькуляторов ── */
+        .calc-panel { display: none; }
+        .calc-panel.active { display: block; }
+    </style>
+</head>
+<body>
+
+    <!-- ══════════════════════════════════════════════
+         ПЕРЕКЛЮЧАТЕЛЬ
+    ══════════════════════════════════════════════ -->
+    <div class="switcher-header">
+        <div class="switcher-label">Выберите калькулятор</div>
+        <div class="switcher-tabs" id="tabs">
+            <button class="switcher-tab active" data-calc="1co">
+                <span class="dot" style="background:#FF5D5B"></span>
+                1С-Отчётность
+            </button>
+            <button class="switcher-tab" data-calc="epd">
+                <span class="dot" style="background:#7C39BF"></span>
+                1С-ЭПД
+            </button>
+            <button class="switcher-tab" data-calc="ikedo">
+                <span class="dot" style="background:#195fa6"></span>
+                Астрал iКЭДО
+            </button>
+        </div>
+    </div>
+
+
+    <!-- ══════════════════════════════════════════════
+         КАЛЬКУЛЯТОР 1: 1С-ОТЧЁТНОСТЬ
+    ══════════════════════════════════════════════ -->
+    <div class="calc-panel active" id="panel-1co">
+
+        <div id="calc-assets" style="display: none;"
+            data-header-src="1co-pdf-header.jpg"
+            data-footer-src-1="1co-pdf-footer-1.jpg"
+            data-footer-src-2="1co-pdf-footer-2.jpg"
+            data-footer-src-3="1co-pdf-footer-3.jpg"
+            data-footer-src-4="1co-pdf-footer-4.jpg"
+            data-footer-src-5="1co-pdf-footer-5.jpg"
+            data-footer-src-6="1co-pdf-footer-6.jpg">
+        </div>
+
+        <div class="calc-page-title">
+            <h1>Помощник подбора тарифов 1С-Отчетность</h1>
+            <p style="text-align: center; color: #666; margin-top: 10px; font-weight: 500;">Рассчитайте стоимость подключения за несколько кликов</p>
+        </div>
+
+        <div class="calc-calculator">
+            <div class="calc-form-row">
+                <label>Подключить группу компаний?</label>
+                <div class="calc-toggle-group" id="calc-group-main-toggle">
+                    <button type="button" class="calc-toggle-btn calc-selected" data-value="no">Нет</button>
+                    <button type="button" class="calc-toggle-btn" data-value="yes">Да</button>
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid #eee; margin: 25px 0;">
+
+            <div id="calc-mode-selection-container" style="display: none;" class="calc-form-row">
+                <label>Выберите режим расчета</label>
+                <div class="calc-toggle-group">
+                    <button type="button" class="calc-tab-btn calc-toggle-btn calc-selected" data-mode="fast">Быстрый</button>
+                    <button type="button" class="calc-tab-btn calc-toggle-btn" data-mode="detailed">Подробный</button>
+                    <button type="button" class="calc-tab-btn calc-toggle-btn" data-mode="addon">Добавить в ГК</button>
+                </div>
+            </div>
+
+            <div id="calc-dynamic-fields"></div>
+            <div id="calc-global-addons-container" class="calc-addons-grid"></div>
+
+            <div class="calc-details-area" style="margin-top: 25px; padding: 15px; background: #fcfcfc; border-radius: 12px; border-left: 4px solid #FF5D5B;">
+                <div style="font-weight: 700; font-size: 11px; margin-bottom: 5px; color: #999; text-transform: uppercase; letter-spacing: 0.5px;">Детализация:</div>
+                <div id="calc-details-content" style="font-size: 14px; white-space: pre-line; color: #444; line-height: 1.6;">Введите данные для расчета...</div>
+            </div>
+
+            <div class="calc-manual-discount-row">
+                <label style="font-weight: 600; font-size: 14px;">Дополнительная скидка:</label>
+                <div class="calc-inputs-group">
+                    <select id="calc-manual-disc-type" style="width: 135px; flex-shrink: 0;">
+                        <option value="percent">Процент %</option>
+                        <option value="rub">Рубли ₽</option>
+                    </select>
+                    <input type="number"
+                        id="calc-manual-disc-val"
+                        placeholder="0"
+                        min="0"
+                        style="text-align: center; min-width: 0;"
+                        onkeydown="if(['-', 'e', 'E', ',', '.'].includes(event.key)) event.preventDefault();">
+                </div>
+            </div>
+
+            <div class="calc-result-box" style="margin-top: 25px; padding: 25px; background: #fff8f8; border-radius: 20px; text-align: center; border: 1px solid rgba(255, 93, 91, 0.1);">
+                <div style="font-weight: 600; color: #666; margin-bottom: 5px; font-size: 14px;">Итоговая стоимость:</div>
+                <div id="calc-total-price" style="font-size: 36px; font-weight: 800; color: #FF5D5B; margin-bottom: 15px;">0 ₽</div>
+                <div id="calc-discount-info" style="color: #27ae60; font-weight: 700; margin-bottom: 15px; display: none;"></div>
+
+                <div id="calc-partner-contacts" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
+                    <input type="text" id="calc-partner-name" placeholder="Ваше ФИО" style="padding: 10px; border-radius: 8px; border: 1px solid #ddd; font-family: 'Montserrat', sans-serif; font-size: 13px;">
+                    <input type="text" id="calc-client-name" placeholder="Название компании клиента" style="padding: 10px; border-radius: 8px; border: 1px solid #ddd; font-family: 'Montserrat', sans-serif; font-size: 13px;">
+                    <input type="text" id="calc-partner-phone" placeholder="Телефон партнера" style="padding: 10px; border-radius: 8px; border: 1px solid #ddd; font-family: 'Montserrat', sans-serif; font-size: 13px;">
+                    <input type="text" id="calc-partner-email" placeholder="Email партнера" style="padding: 10px; border-radius: 8px; border: 1px solid #ddd; font-family: 'Montserrat', sans-serif; font-size: 13px;">
+                </div>
+
+                <button id="calc-generate-pdf" class="calc-submit-btn" style="width: 100%; background-color: #FF5D5B; color: white; border: none; padding: 15px; border-radius: 12px; cursor: pointer; font-size: 16px; font-weight: 700;">
+                    Скачать коммерческое предложение
+                </button>
+            </div>
+        </div>
+
+        <div id="calc-pdf-container-wrapper" style="display: none;">
+            <div id="calc-pdf-template" style="width: 794px; background: white; font-family: 'Montserrat', sans-serif;">
+                <div id="calc-page-1" style="width: 794px; min-height: 1120px; position: relative; background: white;">
+                    <img id="calc-pdf-header-img" src="" style="width: 100%; display: block;">
+                    <div style="padding: 0 50px; margin-top: -30px; position: relative;">
+                        <h2 style="color: #FF5D5B; font-size: 18px; margin-bottom: 10px; font-weight: 800;">Стоимость подключения:</h2>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tbody id="calc-pdf-rows"></tbody>
+                        </table>
+                        <div id="calc-res-place-p1" style="margin-top: 15px;"></div>
+                    </div>
+                </div>
+                <div id="calc-page-2" style="width: 794px; min-height: 1120px; padding: 40px 50px; background: white; box-sizing: border-box; display: none;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tbody id="calc-pdf-rows-p2"></tbody>
+                    </table>
+                    <div id="calc-res-place-p2" style="margin-top: 15px;"></div>
+                </div>
+                <div id="calc-page-last" style="width: 794px; height: 1120px; background: white;">
+                    <img id="calc-pdf-footer-img" src="" style="width: 100%; display: block;">
+                </div>
+            </div>
+        </div>
+
+        <div style="display: none;">
+            <div id="calc-summary-block" style="background: #ffdbdb; padding: 15px 20px; border-radius: 12px; text-align: center; width: 100%; box-sizing: border-box;">
+                <span id="calc-pdf-client-title" style="font-size: 13px; color: #333; display: block; margin-bottom: 5px;"></span>
+                <div class="calc-pdf-total-val" style="font-size: 24px; font-weight: 800; color: #FF5D5B;"></div>
+                <p class="calc-pdf-discount-val" style="color: #27ae60; font-weight: 700; margin-top: 3px; font-size: 11px;"></p>
+            </div>
+            <div id="calc-contact-box-template" style="margin-top: 10px; padding: 15px 25px; border: 1px solid #e0e0e0; border-radius: 15px; display: flex; justify-content: space-between; align-items: center; box-sizing: border-box; width: 100%;">
+                <div style="flex: 1; text-align: left;">
+                    <div style="color: #FF5D5B; font-weight: 800; font-size: 16px; margin-bottom: 2px;">Как подключиться</div>
+                    <div style="color: #666; font-size: 11px;">Свяжитесь с нами, чтобы подключить сервис</div>
+                </div>
+                <div style="text-align: right; flex: 1; display: flex; flex-direction: column; gap: 2px;">
+                    <div id="calc-pdf-employee-name" style="font-weight: 600; color: #666; font-size: 13px; margin-bottom: 1px;"></div>
+                    <div class="calc-c-phone" style="font-weight: 600; font-size: 13px; color: #666;"></div>
+                    <div class="calc-c-email" style="font-size: 12px; color: #666; font-weight: 600;"></div>
+                </div>
+            </div>
+        </div>
+
+        <template id="calc-tpl-solo-mode">
+            <div class="calc-form-row"><label>Регион</label><select id="calc-s-reg"></select></div>
+            <div class="calc-grid-adaptive" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div><label>Тип</label><div class="calc-toggle-group" id="calc-solo-ownership">
+                    <button class="calc-toggle-btn" data-val="ul">ЮЛ</button>
+                    <button class="calc-toggle-btn" data-val="ip">ИП</button>
+                </div></div>
+                <div><label>Срок</label><div class="calc-toggle-group" id="calc-solo-duration">
+                    <button class="calc-toggle-btn" data-val="1">1 год</button>
+                    <button class="calc-toggle-btn" data-val="2">2 года</button>
+                </div></div>
+            </div>
+            <div class="calc-form-row" style="margin-top:15px;">
+                <label>Сколько сотрудников будут подписывать отчетность своим сертификатом?</label>
+                <input type="number"
+                    id="calc-solo-employees"
+                    min="0"
+                    placeholder="1"
+                    onkeydown="if(['-', 'e', 'E', ',', '.'].includes(event.key)) event.preventDefault();"
+                    oninput="window.CalcApp.updateSoloEmployees(this.value)">
+            </div>
+        </template>
+
+        <template id="calc-tpl-fast-mode">
+            <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 40px; gap: 10px; margin-bottom: 5px; opacity: 0.6; font-size: 11px; font-weight: 700;">
+                <div>РЕГИОН</div><div style="text-align:center">ЮЛ</div><div style="text-align:center">ИП</div><div></div>
+            </div>
+            <div id="calc-f-rows"></div>
+            <button class="calc-submit-btn" style="background:#FF5D5B; margin-top:10px;" onclick="CalcApp.addFastRow()">+ Добавить регион</button>
+        </template>
+
+        <template id="calc-tpl-detailed-mode">
+            <div id="calc-existing-count-row" class="calc-form-row" style="display: none; align-items: center; justify-content: space-between; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid #eee;">
+                <label>Уже подключено компаний в ГК</label>
+                <input type="number" id="calc-existing-input" min="0" style="width: 100px; text-align: center;">
+            </div>
+            <div id="calc-det-cards"></div>
+            <button class="calc-submit-btn" style="background: #FF5D5B;" onclick="CalcApp.addDetailedCompany()">+ Добавить компанию</button>
+        </template>
+
+        <template id="calc-tpl-company-card">
+            <div class="calc-company-card" style="background: #fff; border: 1px solid #eee; border-radius: 12px; padding: 15px; margin-bottom: 15px; position: relative; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px; margin-bottom: 10px;">
+                    <input type="text" class="calc-comp-name-input" placeholder="Название компании">
+                    <input type="text" class="calc-comp-inn-input" placeholder="ИНН">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                    <select class="calc-comp-region-select"></select>
+                    <div class="calc-toggle-group calc-ownership-group">
+                        <button class="calc-toggle-btn" data-val="ul">ЮЛ</button>
+                        <button class="calc-toggle-btn" data-val="ip">ИП</button>
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div>
+                        <div style="font-size: 10px; color: #999; margin-bottom: 4px; font-weight: 700;">ЛИЧНЫЙ КАБИНЕТ</div>
+                        <div class="calc-toggle-group calc-lk-group">
+                            <button class="calc-toggle-btn" data-val="base">Базовый</button>
+                            <button class="calc-toggle-btn" data-val="prof">Проф</button>
+                        </div>
+                    </div>
+                    <div>
+                        <div style="font-size: 10px; color: #999; margin-bottom: 4px; font-weight: 700;">МНОГОПОЛЬЗ. РЕЖИМ</div>
+                        <div class="calc-toggle-group calc-multi-group">
+                            <button class="calc-toggle-btn" data-val="small">2-9</button>
+                            <button class="calc-toggle-btn" data-val="large">10+</button>
+                        </div>
+                    </div>
+                </div>
+                <button class="calc-remove-card-btn" style="position:absolute; top: -10px; right: -10px; background: #fff; border: 1px solid #eee; border-radius: 50%; width: 24px; height: 24px; color: red; cursor: pointer; display: none;">&times;</button>
+            </div>
+        </template>
+
+    </div><!-- /panel-1co -->
+
+
+    <!-- ══════════════════════════════════════════════
+         КАЛЬКУЛЯТОР 2: 1С-ЭПД
+    ══════════════════════════════════════════════ -->
+    <div class="calc-panel" id="panel-epd">
+        <header class="page-title">
+            <h1>Помощник подбора тарифов 1С-ЭПД</h1>
+            <p>Рассчитайте стоимость подключения за несколько кликов</p>
+        </header>
+
+        <div class="calculator">
+            <div class="form-row">
+                <label>Выберите тип решения:</label>
+                <div class="toggle-group" id="main-mode-toggle">
+                    <button class="toggle-btn selected" data-click="set-mode" data-val="typical">1С-ЭПД:Типовое решение</button>
+                    <button class="toggle-btn" data-click="set-mode" data-val="project">1С-ЭПД:Проектное решение</button>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <label>Вариант расчета:</label>
+                <div class="toggle-group" id="sub-mode-toggle">
+                    <button class="toggle-btn selected" data-click="set-submode" data-val="standard">Стандартный расчёт</button>
+                    <button class="toggle-btn" data-click="set-submode" data-val="individual">Индивидуальный расчёт</button>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="grid-adaptive">
+                    <div class="input-group">
+                        <label for="docs-month">Количество документов в месяц</label>
+                        <input type="number" id="docs-month" placeholder="0" min="0" data-action="docs-month">
+                    </div>
+                    <div class="input-group">
+                        <label for="docs-year">Количество документов в год</label>
+                        <input type="number" id="docs-year" placeholder="0" min="0" data-action="docs-year">
+                    </div>
+                </div>
+            </div>
+
+            <div id="dynamic-content" class="content-area">
+                <div class="placeholder-text">
+                    Здесь будут параметры тарифа... <br>
+                    <strong>Введите количество документов</strong>
+                </div>
+            </div>
+
+            <div id="signatures-section" style="margin-top: 25px;">
+                <h3 style="color: var(--primary); margin-bottom: 15px;">Электронные подписи</h3>
+                <div class="addon-card" style="border: 2px solid var(--bg-light);">
+                    <div style="margin-bottom: 20px;">
+                        <label style="font-weight: 600; color: var(--primary);">Общее кол-во сотрудников:</label>
+                        <input type="number" id="ukep-qty" class="qty-input" style="width: 100px; margin-left: 10px;" min="0" placeholder="0" data-action="ukep-qty">
+                    </div>
+                    <div class="sig-grid">
+                        <div id="card-basis" class="sig-card">
+                            <div class="sig-header">
+                                <strong>УКЭП Базис</strong>
+                                <label class="custom-switch">
+                                    <input type="checkbox" id="check-basis" data-action="toggle-sig" data-val="basis">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div id="ukep-periods" class="toggle-group" style="font-size: 12px;">
+                                <button data-click="set-ukep-period" data-val="12" class="toggle-btn selected">12 месяцев</button>
+                                <button data-click="set-ukep-period" data-val="15" class="toggle-btn">15 месяцев</button>
+                            </div>
+                            <div id="basis-pricing-container"></div>
+                        </div>
+                        <div id="card-kcr" class="sig-card locked">
+                            <div class="sig-header">
+                                <strong>КЦР</strong>
+                                <label class="custom-switch">
+                                    <input type="checkbox" id="check-kcr" data-action="toggle-sig" data-val="kcr">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <small>Доступно от 6 сотрудников</small>
+                            <div id="kcr-options-container" style="display: none; margin-top: 10px;">
+                                <div class="variant-row kep-row"><span>КЭП ЕГАИС:</span><input type="number" class="qty-input fixed-width" min="0" placeholder="0" data-action="kcr-qty" data-field="egais"></div>
+                                <div class="variant-row kep-row"><span>КЭП Универс.:</span><input type="number" class="qty-input fixed-width" min="0" placeholder="0" data-action="kcr-qty" data-field="univ"></div>
+                                <div class="variant-row kep-row"><span>КЭП Базис:</span><input type="number" class="qty-input fixed-width" min="0" placeholder="0" data-action="kcr-qty" data-field="basis"></div>
+                            </div>
+                            <div id="kcr-pricing-container"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="mchd-section" style="margin-top: 25px;">
+                <h3 style="color: #7C39BF; margin-bottom: 15px;">Машиночитаемые доверенности</h3>
+                <div class="mchd-grid" style="align-items: stretch;">
+                    <div class="mchd-card" id="card-mchd-base" style="display:flex;flex-direction:column;">
+                        <div class="sig-header"><strong>Базовый</strong><label class="custom-switch"><input type="checkbox" id="check-mchd-base" data-action="toggle-mchd" data-type="base"><span class="slider round"></span></label></div>
+                        <p class="mchd-desc">5 МЧД для одной организации.</p>
+                        <input type="number" class="qty-input mchd-input" style="margin-top:auto;" id="input-mchd-base" min="0" placeholder="0" data-action="mchd-qty" data-type="base">
+                        <div id="mchd-base-pricing-container"></div>
+                    </div>
+                    <div class="mchd-card" id="card-mchd-ext" style="display:flex;flex-direction:column;">
+                        <div class="sig-header"><strong>Расширенный</strong><label class="custom-switch"><input type="checkbox" id="check-mchd-ext" data-action="toggle-mchd" data-type="ext"><span class="slider round"></span></label></div>
+                        <p class="mchd-desc">5 МЧД для разных организаций</p>
+                        <input type="number" class="qty-input mchd-input" style="margin-top:auto;" id="input-mchd-ext" min="0" placeholder="0" data-action="mchd-qty" data-type="ext">
+                        <div id="mchd-ext-pricing-container"></div>
+                    </div>
+                    <div class="mchd-card" id="card-mchd-single" style="display:flex;flex-direction:column;">
+                        <div class="sig-header"><strong>Одна МЧД</strong><label class="custom-switch"><input type="checkbox" id="check-mchd-single" data-action="toggle-mchd" data-type="single"><span class="slider round"></span></label></div>
+                        <p class="mchd-desc">Выпуск специалистом</p>
+                        <input type="number" class="qty-input mchd-input" style="margin-top:auto;" id="input-mchd-single" min="0" placeholder="0" data-action="mchd-qty" data-type="single">
+                        <div id="mchd-single-pricing-container"></div>
+                    </div>
+                    <div class="mchd-card" id="card-mchd-extra" style="display:flex;flex-direction:column;">
+                        <div class="sig-header"><strong>Доп. МЧД</strong><label class="custom-switch"><input type="checkbox" id="check-mchd-extra" data-action="toggle-mchd" data-type="extra"><span class="slider round"></span></label></div>
+                        <p class="mchd-desc">Покупка в ЛК</p>
+                        <input type="number" class="qty-input mchd-input" style="margin-top:auto;" id="input-mchd-extra" min="0" placeholder="0" data-action="mchd-qty" data-type="extra">
+                        <div id="mchd-extra-pricing-container"></div>
+                    </div>
+                    <div class="mchd-card" id="card-mchd-start" style="display:flex;flex-direction:column;">
+                        <div class="sig-header"><strong>Старт МЧД</strong><label class="custom-switch"><input type="checkbox" id="check-mchd-start" data-action="toggle-mchd" data-type="start"><span class="slider round"></span></label></div>
+                        <p class="mchd-desc">Старт работы с МЧД в сервисе Астрал Доверенность</p>
+                        <input type="number" class="qty-input mchd-input" style="margin-top:auto;" id="input-mchd-start" min="0" placeholder="0" data-action="mchd-qty" data-type="start">
+                        <div id="mchd-start-pricing-container"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="addons-container"></div>
+
+            <div class="extra-services-section" id="extra-services-card">
+                <div class="extra-services-header">
+                    <div>
+                        <h3 class="extra-services-title">Добавление прочих услуг</h3>
+                    </div>
+                    <label class="custom-switch">
+                        <input type="checkbox" id="check-extra-services" data-action="toggle-extra-services">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+                <div id="extra-services-content" style="display:none;">
+                    <div id="extra-services-list"></div>
+                    <button type="button" class="extra-service-add-btn extra-service-add-btn-wide" data-click="add-extra-service">+ Добавить строку</button>
+                </div>
+            </div>
+
+            <div class="details-area" style="margin-top: 25px; padding: 15px; background: #fcfcfc; border-radius: 12px; border-left: 4px solid #7C39BF;">
+                <div style="font-weight: 700; font-size: 11px; margin-bottom: 5px; color: #999; text-transform: uppercase; letter-spacing: 0.5px;">Детализация:</div>
+                <div id="details-content" style="font-size: 14px; white-space: pre-line; color: #444; line-height: 1.6;">Введите данные для расчета...</div>
+            </div>
+
+            <div class="contact-block" style="margin-top: 25px; background: #fff; border: 2px solid var(--bg-light); border-radius: 20px; padding: 25px;">
+                <h3 style="color: var(--primary); margin: 0 0 20px 0; font-size: 18px;">Контактные данные для КП</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div>
+                        <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Ваше ФИО</label>
+                        <input type="text" id="partner-name" placeholder="Иванов Иван Иванович" style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px;">
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Название компании клиента</label>
+                        <input type="text" id="client-name" placeholder="ООО «Компания»" style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px;">
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Телефон партнера</label>
+                        <input type="tel" id="partner-phone" placeholder="+7 (900) 000-00-00" style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px;">
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Email партнера</label>
+                        <input type="email" id="partner-email" placeholder="partner@company.ru" style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px;">
+                    </div>
+                </div>
+            </div>
+
+            <div class="kp-container" onclick="window.downloadKPEPD && window.downloadKPEPD()">
+                <div class="total-bar">
+                    <div class="total-info">
+                        <span class="kp-label">Скачать коммерческое предложение</span>
+                        <span class="kp-subtitle">Нажмите, чтобы сохранить расчет в PDF</span>
+                    </div>
+                    <div class="total-amount">
+                        <strong id="total-price">0 ₽</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div><!-- /panel-epd -->
+
+
+    <!-- ══════════════════════════════════════════════
+         КАЛЬКУЛЯТОР 3: АСТРАЛ iКЭДО
+    ══════════════════════════════════════════════ -->
+    <div class="calc-panel" id="panel-ikedo">
+        <header class="page-title">
+            <h1>Помощник подбора тарифов Астрал iКЭДО</h1>
+            <p>Рассчитайте стоимость подключения за несколько кликов</p>
+        </header>
+
+        <div class="calculator">
+            <div class="form-row">
+                <label>Вариант расчёта:</label>
+                <div class="toggle-group" id="submode-toggle">
+                    <button class="toggle-btn selected" data-click="set-submode" data-val="standard">Стандартный расчёт</button>
+                    <button class="toggle-btn" data-click="set-submode" data-val="individual">Индивидуальный расчёт</button>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <label>Выберите регион:</label>
+                <div class="toggle-group" id="region-toggle">
+                    <button class="toggle-btn selected" data-click="set-region" data-val="moscow">Москва и Московская область</button>
+                    <button class="toggle-btn" data-click="set-region" data-val="other">Другие регионы</button>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="grid-adaptive">
+                    <div class="input-group">
+                        <label for="employees-count">Количество сотрудников</label>
+                        <input type="number" id="employees-count" placeholder="0" min="0" data-action="employees">
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <label>Тип тарифа:</label>
+                <div class="toggle-group" id="tariff-type-toggle">
+                    <button class="toggle-btn selected" data-click="set-tariff-type" data-val="main">Стандартный</button>
+                    <button class="toggle-btn" data-click="set-tariff-type" data-val="monthly">Помесячный</button>
+                    <button class="toggle-btn" data-click="set-tariff-type" data-val="individual">Индивидуальный</button>
+                </div>
+            </div>
+
+            <div class="form-row" id="term-row">
+                <label>Срок тарифа:</label>
+                <div class="toggle-group" id="term-toggle">
+                    <button class="toggle-btn selected" data-click="set-term" data-val="12">12 месяцев</button>
+                    <button class="toggle-btn" data-click="set-term" data-val="24">24 месяца</button>
+                </div>
+            </div>
+
+            <div class="form-row" id="monthly-months-row" style="display:none;">
+                <div class="input-group" style="max-width:300px;">
+                    <label for="monthly-months-input">Количество месяцев (1–11)</label>
+                    <input type="number" id="monthly-months-input" min="1" max="11" value="1" placeholder="1" data-action="monthly-months">
+                </div>
+            </div>
+
+            <div id="dynamic-content-ikedo" class="content-area">
+                <div class="placeholder-text">
+                    Здесь будут параметры тарифа...<br>
+                    <strong>Введите количество сотрудников</strong>
+                </div>
+            </div>
+
+            <div style="margin-top: 30px;">
+                <h3 style="color: var(--primary); margin: 0 0 15px 0; font-size: 18px;">Сервисные услуги</h3>
+                <div id="services-container" class="services-grid"></div>
+            </div>
+
+            <div class="details-area" style="margin-top: 25px; padding: 15px; background: #fcfcfc; border-radius: 12px; border-left: 4px solid var(--primary);">
+                <div style="font-weight: 700; font-size: 11px; margin-bottom: 5px; color: #999; text-transform: uppercase; letter-spacing: 0.5px;">Детализация:</div>
+                <div id="details-content-ikedo" style="font-size: 14px; white-space: pre-line; color: #444; line-height: 1.6;">Введите данные для расчета...</div>
+            </div>
+
+            <div style="margin-top: 25px; background: #fff; border: 2px solid var(--bg-light); border-radius: 20px; padding: 25px;">
+                <h3 style="color: var(--primary); margin: 0 0 20px 0; font-size: 18px;">Контактные данные для КП</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div>
+                        <label style="display:block; margin-bottom:6px; font-size:13px; font-weight:600; color:var(--text);">Ваше ФИО</label>
+                        <input type="text" id="ikedo-partner-name" placeholder="Иванов Иван Иванович" style="width:100%; padding:12px; border:2px solid #eee; border-radius:10px; font-family:inherit; font-size:14px;">
+                    </div>
+                    <div>
+                        <label style="display:block; margin-bottom:6px; font-size:13px; font-weight:600; color:var(--text);">Название компании клиента</label>
+                        <input type="text" id="ikedo-client-name" placeholder="ООО «Компания»" style="width:100%; padding:12px; border:2px solid #eee; border-radius:10px; font-family:inherit; font-size:14px;">
+                    </div>
+                    <div>
+                        <label style="display:block; margin-bottom:6px; font-size:13px; font-weight:600; color:var(--text);">Телефон</label>
+                        <input type="tel" id="ikedo-partner-phone" placeholder="+7 (900) 000-00-00" style="width:100%; padding:12px; border:2px solid #eee; border-radius:10px; font-family:inherit; font-size:14px;">
+                    </div>
+                    <div>
+                        <label style="display:block; margin-bottom:6px; font-size:13px; font-weight:600; color:var(--text);">Email</label>
+                        <input type="email" id="ikedo-partner-email" placeholder="manager@astralnalog.ru" style="width:100%; padding:12px; border:2px solid #eee; border-radius:10px; font-family:inherit; font-size:14px;">
+                    </div>
+                </div>
+            </div>
+
+            <div class="kp-container" onclick="window.downloadKPIKEDO && window.downloadKPIKEDO()">
+                <div class="total-bar">
+                    <div class="total-info">
+                        <span class="kp-label">Скачать коммерческое предложение</span>
+                        <span class="kp-subtitle">Нажмите, чтобы сохранить расчёт в PDF</span>
+                    </div>
+                    <div class="total-amount">
+                        <strong id="total-price-ikedo">0 ₽</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div><!-- /panel-ikedo -->
+
+
+    <!-- ══════════════════════════════════════════════
+         ПЕРЕКЛЮЧАТЕЛЬ: ЗАГРУЗКА JS + ПОКАЗ КОНТЕНТА
+    ══════════════════════════════════════════════ -->
+    <script>
+        // Ресурсы всех калькуляторов централизованы в window.__CALC_APP_RESOURCES
+        document.querySelectorAll('.calc-panel').forEach(p => p.style.visibility = 'hidden');
+
+        function loadJS(src) {
+            return new Promise((resolve) => {
+                const script = document.createElement('script');
+                script.src = src;
+                script.onload  = resolve;
+                script.onerror = () => { resolve(); };
+                document.body.appendChild(script);
+            });
+        }
+
+        function switchCalc(calcId) {
+            document.querySelectorAll('.switcher-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector(`.switcher-tab[data-calc="${calcId}"]`).classList.add('active');
+            document.querySelectorAll('.calc-panel').forEach(p => {
+                p.classList.remove('active');
+                p.style.visibility = 'visible';
+            });
+            document.getElementById('panel-' + calcId).classList.add('active');
+        }
+
+        function getCandidateUrls(names) {
+            const urls = [];
+            names.forEach((name) => {
+                const encoded = encodeURI(name);
+                urls.push(name, `./${name}`, encoded, `./${encoded}`);
+                try {
+                    urls.push(new URL(name, window.location.href).href);
+                    urls.push(new URL(encoded, window.location.href).href);
+                } catch {}
+            });
+            return [...new Set(urls)];
+        }
+
+        async function fetchJsonCandidate(url) {
+            const res = await fetch(url, { cache: 'no-store' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const text = await res.text();
+            try {
+                return JSON.parse(text);
+            } catch {
+                const trimmed = text.trim();
+                try {
+                    // Формат: { ... }, { ... }
+                    return JSON.parse(`[${trimmed}]`);
+                } catch {
+                    // Формат: { ... }{ ... }
+                    return JSON.parse("[" + trimmed.replace(/}\s*,?\s*{/g, "},{") + "]");
+                }
+            }
+        }
+
+        async function preloadPriceData(calcKey) {
+            const priceMap = (window.__CALC_APP_RESOURCES && window.__CALC_APP_RESOURCES.prices) || {};
+            const names = priceMap[calcKey] || [];
+            const urls = getCandidateUrls(names);
+
+            for (const url of urls) {
+                try {
+                    const data = await fetchJsonCandidate(url);
+                    window.__CALC_PRELOADED_DATA[calcKey] = data;
+                    return true;
+                } catch (e) {
+                }
+            }
+            return false;
+        }
+
+        async function preloadAllPrices() {
+            const priceMap = (window.__CALC_APP_RESOURCES && window.__CALC_APP_RESOURCES.prices) || {};
+            const keys = Object.keys(priceMap);
+            await Promise.all(keys.map(async (key) => {
+                await preloadPriceData(key);
+            }));
+        }
+
+        window.__CALC_PRELOAD_PRICES_PROMISE = preloadAllPrices();
+
+        const scripts = (window.__CALC_APP_RESOURCES && window.__CALC_APP_RESOURCES.scripts) || [];
+        Promise.all([
+            window.__CALC_PRELOAD_PRICES_PROMISE,
+            ...scripts.map(loadJS)
+        ]).then(() => {
+            switchCalc('1co');
+        });
+
+        // Клики по табам
+        document.querySelectorAll('.switcher-tab').forEach(tab => {
+            tab.addEventListener('click', () => switchCalc(tab.dataset.calc));
+        });
+    </script>
+
+</body>
+</html>
