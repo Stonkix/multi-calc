@@ -6,29 +6,42 @@
     <title>Помощник подбора тарифов</title>
     <link rel="icon" href="data:,">
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
 
     <script>
         window.__CALC_APP_RESOURCES = {
-            styles: ['1co-calc-style.css', 'epd-calc-style.css', 'ikedo-calc-style.css'],
-            scripts: ['1co-calc-script.js', 'epd-calc-script.js', 'ikedo-calc-script.js'],
+            styles: ['style.css'],
+            scripts: ['app.js'],
             prices: {
                 '1co': ['1co-tariffs.json'],
                 'epd': ['epd-tariffs.json'],
-                'ikedo': ['iKedo-tafiffs.json']
-            }
+                'ikedo': ['iKedo-tafiffs.json'],
+                'ao5': ['ao5-tariffs.json']
+            },
+            images: [
+                '1co-pdf-header.jpg',
+                '1co-pdf-footer-1.jpg', '1co-pdf-footer-2.jpg', '1co-pdf-footer-3.jpg',
+                '1co-pdf-footer-4.jpg', '1co-pdf-footer-5.jpg', '1co-pdf-footer-6.jpg',
+                'epd-pdf-base-header.jpg', 'epd-pdf-base-middle.jpg', 'epd-pdf-base-footer.jpg',
+                'epd-pdf-project-header.jpg', 'epd-pdf-project-middle.jpg', 'epd-pdf-project-footer.jpg',
+                'ikedo-pdf-header.jpg', 'ikedo-pdf-footer-1.jpg', 'ikedo-pdf-footer-2.jpg',
+                'pdf_header_main.jpg', 'pdf_header_ub.png',
+                'pdf_footer_main_1.jpg', 'pdf_footer_main_2.jpg', 'pdf_footer_main_3.jpg',
+                'pdf_footer_main_4.jpg', 'pdf_footer_main_5.jpg', 'pdf_footer_main_6.jpg', 'pdf_footer_main_7.jpg',
+                'pdf_footer_ub_1.jpg', 'pdf_footer_ub_2.jpg', 'pdf_footer_ub_3.jpg',
+                'pdf_footer_ub_4.jpg', 'pdf_footer_ub_5.jpg', 'pdf_footer_ub_6.jpg', 'pdf_footer_ub_7.jpg'
+            ]
         };
         window.__CALC_PRELOADED_DATA = Object.create(null);
     </script>
 
     <script>
-        // Подключение статики (CSS) централизовано из главного index.html
-        (function attachCalcStyles() {
-            const styles = (window.__CALC_APP_RESOURCES && window.__CALC_APP_RESOURCES.styles) || [];
-            styles.forEach((href) => {
-                const link = document.createElement('link');
-                link.rel = 'stylesheet';
-                link.href = href;
-                document.head.appendChild(link);
+        // Централизованный preload изображений всех калькуляторов
+        (function preloadCalcImages() {
+            const images = (window.__CALC_APP_RESOURCES && window.__CALC_APP_RESOURCES.images) || [];
+            images.forEach((src) => {
+                const img = new Image();
+                img.src = src;
             });
         })();
     </script>
@@ -102,6 +115,7 @@
         .switcher-tab[data-calc="1co"].active  { color: #FF5D5B; border-color: #FF5D5B; }
         .switcher-tab[data-calc="epd"].active  { color: #7C39BF; border-color: #7C39BF; }
         .switcher-tab[data-calc="ikedo"].active { color: #195fa6; border-color: #195fa6; }
+        .switcher-tab[data-calc="ao5"].active { color: #2AACE2; border-color: #2AACE2; }
 
         /* ── Панели калькуляторов ── */
         .calc-panel { display: none; }
@@ -109,6 +123,7 @@
     </style>
 </head>
 <body>
+    <div class="multi-calc-root" id="multi-calc-root">
 
     <!-- ══════════════════════════════════════════════
          ПЕРЕКЛЮЧАТЕЛЬ
@@ -127,6 +142,10 @@
             <button class="switcher-tab" data-calc="ikedo">
                 <span class="dot" style="background:#195fa6"></span>
                 Астрал iКЭДО
+            </button>
+            <button class="switcher-tab" data-calc="ao5">
+                <span class="dot" style="background:#2AACE2"></span>
+                АО5
             </button>
         </div>
     </div>
@@ -257,7 +276,7 @@
             </div>
         </div>
 
-        <template id="calc-tpl-solo-mode">
+                <template id="calc-tpl-solo-mode">
             <div class="calc-form-row"><label>Регион</label><select id="calc-s-reg"></select></div>
             <div class="calc-grid-adaptive" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                 <div><label>Тип</label><div class="calc-toggle-group" id="calc-solo-ownership">
@@ -269,14 +288,27 @@
                     <button class="calc-toggle-btn" data-val="2">2 года</button>
                 </div></div>
             </div>
-            <div class="calc-form-row" style="margin-top:15px;">
-                <label>Сколько сотрудников будут подписывать отчетность своим сертификатом?</label>
-                <input type="number"
-                    id="calc-solo-employees"
-                    min="0"
-                    placeholder="1"
-                    onkeydown="if(['-', 'e', 'E', ',', '.'].includes(event.key)) event.preventDefault();"
-                    oninput="window.CalcApp.updateSoloEmployees(this.value)">
+            <div class="calc-grid-adaptive" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px;">
+                <div>
+                        <div style="font-size: 10px; color: #999; margin-bottom: 4px; font-weight: 700; display: flex; align-items: center; gap: 5px;">
+                            ЛИЧНЫЙ КАБИНЕТ
+                            <button class="calc-months-hint-btn calc-months-hint-card-lk" title="Рассчитать количество месяцев">+</button>
+                        </div>
+                    <div class="calc-toggle-group" id="calc-solo-lk-group">
+                        <button class="calc-toggle-btn" data-val="base">Базовый</button>
+                        <button class="calc-toggle-btn" data-val="prof">Проф</button>
+                    </div>
+                </div>
+                <div>
+                        <div style="font-size: 10px; color: #999; margin-bottom: 4px; font-weight: 700; display: flex; align-items: center; gap: 5px;">
+                            МНОГОПОЛЬЗ. РЕЖИМ
+                            <button class="calc-months-hint-btn calc-months-hint-card-multi" title="Рассчитать количество месяцев">+</button>
+                        </div>
+                    <div class="calc-toggle-group" id="calc-solo-multi-group">
+                        <button class="calc-toggle-btn" data-val="small">2-9</button>
+                        <button class="calc-toggle-btn" data-val="large">10+</button>
+                    </div>
+                </div>
             </div>
         </template>
 
@@ -299,10 +331,12 @@
 
         <template id="calc-tpl-company-card">
             <div class="calc-company-card" style="background: #fff; border: 1px solid #eee; border-radius: 12px; padding: 15px; margin-bottom: 15px; position: relative; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                
                 <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px; margin-bottom: 10px;">
                     <input type="text" class="calc-comp-name-input" placeholder="Название компании">
                     <input type="text" class="calc-comp-inn-input" placeholder="ИНН">
                 </div>
+
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
                     <select class="calc-comp-region-select"></select>
                     <div class="calc-toggle-group calc-ownership-group">
@@ -310,26 +344,85 @@
                         <button class="calc-toggle-btn" data-val="ip">ИП</button>
                     </div>
                 </div>
+
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                     <div>
-                        <div style="font-size: 10px; color: #999; margin-bottom: 4px; font-weight: 700;">ЛИЧНЫЙ КАБИНЕТ</div>
+                        <div style="font-size: 10px; color: #999; margin-bottom: 4px; font-weight: 700; display: flex; align-items: center; gap: 5px;">
+                        ЛИЧНЫЙ КАБИНЕТ
+                        <button class="calc-months-hint-btn" onclick="CalcApp.openMonthsCalc('solo','lk')" title="Рассчитать количество месяцев">+</button>
+                        </div>
                         <div class="calc-toggle-group calc-lk-group">
                             <button class="calc-toggle-btn" data-val="base">Базовый</button>
                             <button class="calc-toggle-btn" data-val="prof">Проф</button>
                         </div>
                     </div>
                     <div>
-                        <div style="font-size: 10px; color: #999; margin-bottom: 4px; font-weight: 700;">МНОГОПОЛЬЗ. РЕЖИМ</div>
+                        <div style="font-size: 10px; color: #999; margin-bottom: 4px; font-weight: 700; display: flex; align-items: center; gap: 5px;">
+                        МНОГОПОЛЬЗ. РЕЖИМ
+                        <button class="calc-months-hint-btn" onclick="CalcApp.openMonthsCalc('solo','multi')" title="Рассчитать количество месяцев">+</button>
+                        </div>
                         <div class="calc-toggle-group calc-multi-group">
                             <button class="calc-toggle-btn" data-val="small">2-9</button>
                             <button class="calc-toggle-btn" data-val="large">10+</button>
                         </div>
                     </div>
                 </div>
+                
                 <button class="calc-remove-card-btn" style="position:absolute; top: -10px; right: -10px; background: #fff; border: 1px solid #eee; border-radius: 50%; width: 24px; height: 24px; color: red; cursor: pointer; display: none;">&times;</button>
             </div>
         </template>
 
+        <!-- Модальное окно расчета месяцев -->
+        <div id="calc-months-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:9999; align-items:center; justify-content:center;">
+            <div style="background:#fff; border-radius:20px; padding:28px 28px 24px; max-width:480px; width:92%; box-shadow:0 20px 60px rgba(0,0,0,0.2); font-family:'Montserrat',sans-serif; position:relative; max-height:90vh; overflow-y:auto;">
+                <button onclick="CalcApp.closeMonthsCalc()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:20px;cursor:pointer;color:#aaa;line-height:1;">×</button>
+                <div style="font-weight:800;font-size:16px;color:#FF5D5B;margin-bottom:4px;">Расчет стоимости расширения</div>
+                <div id="calc-mc-subtitle" style="font-size:12px;color:#999;margin-bottom:18px;font-weight:600;"></div>
+                <div id="calc-mc-variant-row" style="margin-bottom:16px;">
+                    <label style="display:block;font-weight:600;font-size:12px;color:#999;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Вариант</label>
+                    <div id="calc-mc-variant-group" style="display:flex;background:#f1f3f5;padding:5px;border-radius:14px;gap:5px;"></div>
+                </div>
+                <div id="calc-mc-gk-row" style="display:none;margin-bottom:16px;">
+                    <label style="display:block;font-weight:600;font-size:12px;color:#999;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Группа компаний?</label>
+                    <div style="display:flex;background:#f1f3f5;padding:5px;border-radius:14px;gap:5px;">
+                        <button class="calc-mc-gk-btn" data-val="no" style="flex:1;border:2px solid transparent;padding:9px 10px;border-radius:10px;cursor:pointer;font-weight:600;font-family:Montserrat,sans-serif;font-size:13px;transition:all 0.2s;background:#FF5D5B;color:#fff;border-color:#fff;">Нет</button>
+                        <button class="calc-mc-gk-btn" data-val="yes" style="flex:1;border:2px solid transparent;padding:9px 10px;border-radius:10px;cursor:pointer;font-weight:600;font-family:Montserrat,sans-serif;font-size:13px;transition:all 0.2s;background:transparent;color:#7f8c8d;">Да</button>
+                    </div>
+                </div>
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+                    <div>
+                        <label style="display:block;font-weight:600;font-size:13px;margin-bottom:6px;">Дата начала расширения</label>
+                        <input type="text" id="calc-mc-connect-date" placeholder="дд.мм.гггг"
+                            style="width:100%;padding:10px 12px;border:1px solid #e1e8ed;border-radius:10px;font-family:'Montserrat',sans-serif;font-size:13px;box-sizing:border-box;">
+                    </div>
+                    <div>
+                        <label style="display:block;font-weight:600;font-size:13px;margin-bottom:6px;">Дата окончания расширения</label>
+                        <input type="text" id="calc-mc-license-end" placeholder="дд.мм.гггг"
+                            style="width:100%;padding:10px 12px;border:1px solid #e1e8ed;border-radius:10px;font-family:'Montserrat',sans-serif;font-size:13px;box-sizing:border-box;">
+                    </div>
+                </div>
+                <button onclick="CalcApp.calcMonths()" style="width:100%;padding:12px;background:#FF5D5B;color:#fff;border:none;border-radius:12px;font-weight:700;font-size:14px;cursor:pointer;font-family:'Montserrat',sans-serif;margin-bottom:14px;">Рассчитать</button>
+
+                <div id="calc-mc-result" style="display:none;background:#fff8f8;border-radius:12px;padding:16px 20px;margin-bottom:14px;border:1px solid rgba(255,93,91,0.15);">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
+                        <div style="min-width:90px;">
+                            <div style="font-size:11px;color:#999;margin-bottom:2px;">Месяцев</div>
+                            <div id="calc-mc-months-val" style="font-size:28px;font-weight:800;color:#FF5D5B;white-space:nowrap;"></div>
+                        </div>
+                        <div style="text-align:right;min-width:110px;">
+                            <div style="font-size:11px;color:#999;margin-bottom:2px;">Стоимость</div>
+                            <div id="calc-mc-price-val" style="font-size:28px;font-weight:800;color:#333;white-space:nowrap;"></div>
+                            <div id="calc-mc-price-formula" style="font-size:10px;color:#bbb;margin-top:2px;white-space:nowrap;"></div>
+                        </div>
+                    </div>
+                    <div id="calc-mc-explain" style="font-size:11px;color:#999;margin-top:8px;border-top:1px solid #f0e0e0;padding-top:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+                </div>
+
+                <button id="calc-mc-apply-btn" onclick="CalcApp.applyMonths()" style="width:100%;padding:12px;background:#27ae60;color:#fff;border:none;border-radius:12px;font-weight:700;font-size:14px;cursor:pointer;font-family:'Montserrat',sans-serif;display:none;margin-bottom:10px;">Применить к расчету</button>
+                <button onclick="CalcApp.closeMonthsCalc()" style="width:100%;padding:10px;background:none;border:1px solid #eee;border-radius:12px;font-weight:600;font-size:13px;cursor:pointer;color:#999;font-family:'Montserrat',sans-serif;">← Назад</button>
+            </div>
+        </div>
     </div><!-- /panel-1co -->
 
 
@@ -380,13 +473,13 @@
             </div>
 
             <div id="signatures-section" style="margin-top: 25px;">
-                <h3 style="color: var(--primary); margin-bottom: 15px;">Электронные подписи</h3>
+                <h3 style="color: var(--primary); margin-bottom: 15px; font-size: 18px;">Электронные подписи</h3>
                 <div class="addon-card" style="border: 2px solid var(--bg-light);">
                     <div style="margin-bottom: 20px;">
                         <label style="font-weight: 600; color: var(--primary);">Общее кол-во сотрудников:</label>
                         <input type="number" id="ukep-qty" class="qty-input" style="width: 100px; margin-left: 10px;" min="0" placeholder="0" data-action="ukep-qty">
                     </div>
-                    <div class="sig-grid">
+                    <div class="sig-grid" style="align-items: stretch;">
                         <div id="card-basis" class="sig-card">
                             <div class="sig-header">
                                 <strong>УКЭП Базис</strong>
@@ -422,7 +515,7 @@
             </div>
 
             <div id="mchd-section" style="margin-top: 25px;">
-                <h3 style="color: #7C39BF; margin-bottom: 15px;">Машиночитаемые доверенности</h3>
+                <h3 style="color: #7C39BF; margin-bottom: 15px; font-size: 18px;">Машиночитаемые доверенности</h3>
                 <div class="mchd-grid" style="align-items: stretch;">
                     <div class="mchd-card" id="card-mchd-base" style="display:flex;flex-direction:column;">
                         <div class="sig-header"><strong>Базовый</strong><label class="custom-switch"><input type="checkbox" id="check-mchd-base" data-action="toggle-mchd" data-type="base"><span class="slider round"></span></label></div>
@@ -483,22 +576,42 @@
             <div class="contact-block" style="margin-top: 25px; background: #fff; border: 2px solid var(--bg-light); border-radius: 20px; padding: 25px;">
                 <h3 style="color: var(--primary); margin: 0 0 20px 0; font-size: 18px;">Контактные данные для КП</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                    <div>
-                        <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Ваше ФИО</label>
-                        <input type="text" id="partner-name" placeholder="Иванов Иван Иванович" style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px;">
-                    </div>
-                    <div>
-                        <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Название компании клиента</label>
-                        <input type="text" id="client-name" placeholder="ООО «Компания»" style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px;">
-                    </div>
-                    <div>
-                        <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Телефон партнера</label>
-                        <input type="tel" id="partner-phone" placeholder="+7 (900) 000-00-00" style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px;">
-                    </div>
-                    <div>
-                        <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Email партнера</label>
-                        <input type="email" id="partner-email" placeholder="partner@company.ru" style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px;">
-                    </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Ваше ФИО</label>
+                            <input type="text" id="partner-name" placeholder="Иванов Иван Иванович" style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px; transition: border-color 0.3s;" onfocus="this.style.borderColor='#7C39BF'" onblur="this.style.borderColor='#eee'">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Название компании клиента</label>
+                            <input type="text" id="client-name" placeholder="ООО «Компания»" style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px; transition: border-color 0.3s;" onfocus="this.style.borderColor='#7C39BF'" onblur="this.style.borderColor='#eee'">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Телефон партнера</label>
+                            <input type="tel" id="partner-phone" placeholder="+7 (900) 000-00-00" style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px; transition: border-color 0.3s;" onfocus="this.style.borderColor='#7C39BF'" onblur="this.style.borderColor='#eee'">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Email партнера</label>
+                            <input type="email" id="partner-email" placeholder="partner@company.ru" style="width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px; transition: border-color 0.3s;" onfocus="this.style.borderColor='#7C39BF'" onblur="this.style.borderColor='#eee'">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Актуальность КП</label>
+                            <div style="position: relative;">
+                                <div id="kp-validity-display" onclick="window.toggleValidityDropdown()" style="width: 100%; padding: 12px 36px 12px 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px; background: #fff; cursor: pointer; box-sizing: border-box; transition: border-color 0.3s; user-select: none;">
+                                    30 дней
+                                </div>
+                                <div style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="8" viewBox="0 0 12 8"><path fill="#7C39BF" d="M1 1l5 5 5-5"/></svg>
+                                </div>
+                                <div id="kp-validity-dropdown" style="display: none; position: absolute; top: calc(100% + 4px); left: 0; width: 100%; background: #fff; border: 2px solid #7C39BF; border-radius: 10px; z-index: 100; overflow: hidden; box-shadow: 0 4px 16px rgba(124,57,191,0.12);">
+                                    <div onclick="window.handleValidityChange('30')" style="padding: 12px; font-size: 14px; cursor: pointer; transition: background 0.15s;" onmouseover="this.style.background='#f5eeff'" onmouseout="this.style.background=''">
+                                        30 дней
+                                    </div>
+                                    <div onclick="window.handleValidityChange('custom')" style="padding: 12px; font-size: 14px; cursor: pointer; border-top: 1px solid #eee; transition: background 0.15s;" onmouseover="this.style.background='#f5eeff'" onmouseout="this.style.background=''">
+                                        Другое...
+                                    </div>
+                                </div>
+                                <input type="date" id="kp-validity-date-picker" style="position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; top: 0; left: 0;" onchange="window.handleCustomDatePick(this.value)">
+                            </div>
+                        </div>
                 </div>
             </div>
 
@@ -629,6 +742,268 @@
         </div>
     </div><!-- /panel-ikedo -->
 
+    <div class="calc-panel" id="panel-ao5">
+<div id="ao5-calc-assets" style="display:none;"
+  data-main-header-src="pdf_header_main.jpg"
+  data-main-footer-src-1="pdf_footer_main_1.jpg"
+  data-main-footer-src-2="pdf_footer_main_2.jpg"
+  data-main-footer-src-3="pdf_footer_main_3.jpg"
+  data-main-footer-src-4="pdf_footer_main_4.jpg"
+  data-main-footer-src-5="pdf_footer_main_5.jpg"
+  data-main-footer-src-6="pdf_footer_main_6.jpg"
+  data-main-footer-src-7="pdf_footer_main_7.jpg"
+  data-ub-header-src="pdf_header_ub.png"
+  data-ub-footer-src-1="pdf_footer_ub_1.jpg"
+  data-ub-footer-src-2="pdf_footer_ub_2.jpg"
+  data-ub-footer-src-3="pdf_footer_ub_3.jpg"
+  data-ub-footer-src-4="pdf_footer_ub_4.jpg"
+  data-ub-footer-src-5="pdf_footer_ub_5.jpg"
+  data-ub-footer-src-6="pdf_footer_ub_6.jpg"
+  data-ub-footer-src-7="pdf_footer_ub_7.jpg">
+</div>
+
+<div class="page-header">
+  <div class="logo-mark">
+    <svg viewBox="0 0 24 24"><path d="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 3a3 3 0 1 0 6 0 3 3 0 0 0-6 0z"/></svg>
+  </div>
+  <div class="page-header-text">
+    <h1>Помощник подбора тарифов Астрал Отчет 5.0</h1>
+    <p>Рассчитайте стоимость подключения за несколько кликов</p>
+  </div>
+</div>
+
+<div class="calc-card">
+
+  <div class="top-tabs">
+    <button class="top-tab active" data-top="solo">
+      Одна организация
+      <span class="tsub">ЮЛ или ИП</span>
+    </button>
+    <button class="top-tab" data-top="gk">
+      Группа компаний
+      <span class="tsub">от 3 организаций</span>
+    </button>
+    <button class="top-tab" data-top="ub">
+      Уполномоченная бухгалтерия
+      <span class="tsub">бухгалтерские фирмы</span>
+    </button>
+  </div>
+
+  <div id="ao5-dyn"><div id="ao5-loading-msg">⏳ Загрузка данных о тарифах...</div></div>
+
+  <div id="ao5-addons-wrap" style="display:none;">
+    <div class="divider"></div>
+    <div class="slabel">Дополнительные услуги</div>
+    <div class="addon-grid">
+      <div class="addon-card" id="ao5-adn-ext">
+        <div class="addon-hd">
+          <span class="addon-title">Дополнительные направления / расширения</span>
+          <label class="sw">
+            <input type="checkbox" onchange="Ao5App.toggleAddon('ao5-adn-ext')">
+            <span class="sw-t"></span>
+          </label>
+        </div>
+        <div class="addon-variants">
+          <div class="vrow" id="ao5-vrow-ext-ip">
+            <span>ИП/ФЛ — +1 направление</span>
+            <input type="number" id="ao5-ext-ip" min="0" placeholder="0"
+                   onkeydown="if(['-','e','E',',','.'].includes(event.key))event.preventDefault();"
+                   oninput="Ao5App.calc()">
+          </div>
+          <div class="vrow" id="ao5-vrow-ext-ul">
+            <span>ЮЛ — +1 направление</span>
+            <input type="number" id="ao5-ext-ul" min="0" placeholder="0"
+                   onkeydown="if(['-','e','E',',','.'].includes(event.key))event.preventDefault();"
+                   oninput="Ao5App.calc()">
+          </div>
+          <div class="vrow">
+            <span>Доп. ИФНС</span>
+            <input type="number" id="ao5-ext-ifns" min="0" placeholder="0"
+                   onkeydown="if(['-','e','E',',','.'].includes(event.key))event.preventDefault();"
+                   oninput="Ao5App.calc()">
+          </div>
+          <div class="vrow">
+            <span>Доп. Росстат</span>
+            <input type="number" id="ao5-ext-stat" min="0" placeholder="0"
+                   onkeydown="if(['-','e','E',',','.'].includes(event.key))event.preventDefault();"
+                   oninput="Ao5App.calc()">
+          </div>
+          <div class="vrow">
+            <span>ФСРАР</span>
+            <input type="number" id="ao5-ext-fsrar" min="0" placeholder="0"
+                   onkeydown="if(['-','e','E',',','.'].includes(event.key))event.preventDefault();"
+                   oninput="Ao5App.calc()">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="addon-grid">
+      <div class="addon-card" id="ao5-adn-extra">
+        <div class="addon-hd">
+          <span class="addon-title">Добавление прочих услуг</span>
+          <label class="sw">
+            <input type="checkbox" onchange="Ao5App.toggleAddon('ao5-adn-extra')">
+            <span class="sw-t"></span>
+          </label>
+        </div>
+        <div class="addon-variants" id="ao5-extra-services-content">
+          <div class="extra-service-grid extra-service-grid-head">
+            <span>Наименование</span>
+            <span>Количество</span>
+            <span>Цена</span>
+            <span></span>
+          </div>
+          <div class="extra-service-list" id="ao5-extra-services-list"></div>
+          <button type="button" class="extra-service-add-btn extra-service-add-btn-wide" onclick="Ao5App.addExtraService()">+ Добавить строку</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="details-area">
+    <div class="dh">Детализация</div>
+    <div class="db" id="ao5-det-body">Введите данные для расчёта...</div>
+  </div>
+
+  <div class="disc-row">
+    <label>Дополнительная скидка</label>
+    <div class="disc-inputs">
+      <select id="ao5-disc-type" onchange="Ao5App.calc()">
+        <option value="pct">Процент %</option>
+        <option value="rub">Рубли ₽</option>
+      </select>
+      <input type="number" id="ao5-disc-val" placeholder="0" min="0"
+             onkeydown="if(['-','e','E',',','.'].includes(event.key))event.preventDefault();"
+             oninput="Ao5App.calc()">
+    </div>
+  </div>
+
+  <div class="result-box">
+    <div class="r-label">Итоговая стоимость:</div>
+    <div class="r-price" id="ao5-r-price">0 ₽</div>
+    <div class="r-disc"  id="ao5-r-disc"></div>
+    <div class="cg">
+      <input type="text" id="ao5-c-org"    placeholder="Наименование организации партнера">
+      <input type="text" id="ao5-c-name"   placeholder="Ваше ФИО">
+      <input type="text" id="ao5-c-phone"  placeholder="Телефон партнёра">
+      <input type="text" id="ao5-c-email"  placeholder="Email партнёра">
+      <input type="text" id="ao5-c-client" placeholder="Название компании клиента">
+    </div>
+    <button class="btn-pdf" id="ao5-btn-pdf" disabled>Скачать коммерческое предложение</button>
+  </div>
+
+</div>
+
+
+<!-- ШАБЛОНЫ -->
+
+<template id="ao5-tpl-solo">
+  <div class="frow">
+    <label>Регион</label>
+    <select id="ao5-sol-reg"><option value="" disabled selected>Выберите регион</option></select>
+  </div>
+  <div class="g2" style="margin-bottom:16px;">
+    <div>
+      <div class="sublabel">Тип организации</div>
+      <div class="tg" id="ao5-sol-own">
+        <button class="tb active" data-v="ul">ЮЛ</button>
+        <button class="tb"        data-v="ip">ИП / ФЛ</button>
+      </div>
+    </div>
+  </div>
+  <div class="slabel">Выберите тариф</div>
+  <div class="tariff-grid" id="ao5-sol-tariffs"></div>
+</template>
+
+<template id="ao5-tpl-gk">
+  <div class="inner-tabs" id="ao5-gk-tabs">
+    <button class="inner-tab active" data-m="fast">Быстрый</button>
+    <button class="inner-tab"        data-m="detailed">Подробный</button>
+    <button class="inner-tab"        data-m="addon">Добавить в ГК</button>
+  </div>
+  <div id="ao5-gk-inner"></div>
+</template>
+
+<template id="ao5-tpl-fast">
+  <div id="ao5-gk-tariff-row" style="display:none;"></div>
+  <div class="ft-head">
+    <div>РЕГИОН</div>
+    <div style="text-align:center">ЮЛ</div>
+    <div style="text-align:center">ИП</div>
+    <div></div>
+  </div>
+  <div id="ao5-fr-rows"></div>
+  <button class="btn-add" id="ao5-btn-add-fast">＋ Добавить регион</button>
+</template>
+
+<template id="ao5-tpl-detailed">
+  <div class="exist-row" id="ao5-ex-row" style="display:none;">
+    <label>Уже подключено компаний в ГК</label>
+    <input type="number" id="ao5-ex-cnt" min="0" value="0"
+           onkeydown="if(['-','e','E',',','.'].includes(event.key))event.preventDefault();"
+           oninput="Ao5App.setExist(parseInt(this.value)||0)">
+  </div>
+  <div id="ao5-det-cards"></div>
+  <button class="btn-add" id="ao5-btn-add-det">＋ Добавить компанию</button>
+</template>
+
+<template id="ao5-tpl-cc">
+  <div class="cc">
+    <button class="cc-remove" style="display:none;">&times;</button>
+    <div class="g2" style="margin-bottom:10px;">
+      <input class="cc-name cc-inner-input" type="text" placeholder="Название компании">
+      <input class="cc-inn  cc-inner-input" type="text" placeholder="ИНН">
+    </div>
+    <div class="g2" style="margin-bottom:10px;">
+      <select class="cc-reg cc-inner-select"></select>
+      <div class="tg cc-own">
+        <button class="tb active" data-v="ul">ЮЛ</button>
+        <button class="tb"        data-v="ip">ИП / ФЛ</button>
+      </div>
+    </div>
+    <div style="margin:0;">
+      <div class="sublabel" style="margin-bottom:6px;">Тариф</div>
+      <select class="cc-tariff cc-inner-select"></select>
+    </div>
+  </div>
+</template>
+
+<template id="ao5-tpl-ub">
+  <div class="ub-form">
+    <div class="frow">
+      <label>Регион</label>
+      <select id="ao5-ub-reg"><option value="" disabled selected>Выберите регион</option></select>
+    </div>
+    <div class="frow" style="margin-bottom:0; display:none;">
+      <label>Кол-во обслуживаемых организаций</label>
+      <input type="number" id="ao5-ub-orgs" min="1" placeholder="1" value="1"
+             onkeydown="if(['-','e','E',',','.'].includes(event.key))event.preventDefault();">
+    </div>
+    <div class="frow" style="margin-bottom:0;">
+      <label>Кол-во отчётов в месяц (прогноз)</label>
+      <input type="number" id="ao5-ub-reports" min="0" placeholder="0" value="0"
+             onkeydown="if(['-','e','E',',','.'].includes(event.key))event.preventDefault();">
+    </div>
+    <div class="ub-billing">
+      <div class="sublabel" style="margin-bottom:8px;">Режим расчета</div>
+      <div class="ub-billing-tabs" id="ao5-ub-billing-tabs">
+        <button type="button" class="ub-billing-btn active" data-v="quarter">Квартал</button>
+        <button type="button" class="ub-billing-btn" data-v="year">Год</button>
+      </div>
+      <label class="ub-minpay">
+        <span>Минимальный платеж для 1-го квартала</span>
+        <span class="sw">
+          <input type="checkbox" id="ao5-ub-minpay" checked>
+          <span class="sw-t"></span>
+        </span>
+      </label>
+    </div>
+    <div class="ub-info" id="ao5-ub-info" style="display:none;"></div>
+  </div>
+</template>
+    </div><!-- /panel-ao5 -->
+    </div><!-- /multi-calc-root -->
+
 
     <!-- ══════════════════════════════════════════════
          ПЕРЕКЛЮЧАТЕЛЬ: ЗАГРУЗКА JS + ПОКАЗ КОНТЕНТА
@@ -659,12 +1034,22 @@
 
         function getCandidateUrls(names) {
             const urls = [];
+            const scriptNames = (window.__CALC_APP_RESOURCES && window.__CALC_APP_RESOURCES.scripts) || [];
+            const runtimeScript = scriptNames.length ? scriptNames[0] : 'app.js';
+            let scriptBase = null;
+            try {
+                scriptBase = new URL('.', new URL(runtimeScript, window.location.href).href);
+            } catch {}
             names.forEach((name) => {
                 const encoded = encodeURI(name);
                 urls.push(name, `./${name}`, encoded, `./${encoded}`);
                 try {
                     urls.push(new URL(name, window.location.href).href);
                     urls.push(new URL(encoded, window.location.href).href);
+                    if (scriptBase) {
+                        urls.push(new URL(name, scriptBase).href);
+                        urls.push(new URL(encoded, scriptBase).href);
+                    }
                 } catch {}
             });
             return [...new Set(urls)];
@@ -730,3 +1115,4 @@
 
 </body>
 </html>
+

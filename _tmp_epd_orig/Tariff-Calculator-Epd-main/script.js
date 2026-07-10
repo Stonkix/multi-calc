@@ -1,6 +1,3 @@
-(function() {
-'use strict';
-
 /**
  * 1. КОНФИГУРАЦИЯ И КОНСТАНТЫ
  */
@@ -43,15 +40,21 @@ const CONSTANTS = {
             epd_training_tr: "Обучение и консультация по запуску работы в 1С-ЭПД (ТР)",
             epd_training_pr: "Обучение и консультация по запуску работы в 1С-ЭПД (ПР)",
             epd_transition_survey: "Предпроектное обследование по переходу на ЭПД",
-            epd_goslog_support: "Настройка рабочего места и техническая поддержка по регистрации на платформе ГосЛог (для экспедиторов)",
-            epd_config_update: "Доработка конфигурации 1С для работы с ЭПД"
+            epd_config_update: "Доработка конфигурации 1С для работы с ЭПД",
+            install_local: "Установка 1С на локальный компьютер",
+            install_server: "Установка 1С на сервер",
+            install_thin: "Установка 1С на тонкий клиент 1С на локальный компьютер",
+            update_configs: "Обновление типовых конфигураций",
+            migrate_fresh: "Перенос базы 1С из локальной 1С во Фреш",
+            migrate_pc: "Перенос базы 1С на другой компьютер",
+            install_thin_client: "Установка тонкого клиента"
         }
     },
     LIMITS: [600, 1000, 5000, 10000, 50000, 100000],
 
     ADDONS: [
         {
-            id: 'setup', title: 'Удалённая настройка рабочего места',
+            id: 'setup', title: 'Удалённая настройка рабочего места для работы с ЭП',
             items: [
                 { id: 'sw1', label: 'Windows (nalog.ru <b>или</b> ЕСИА)', keyRef: 'setup_win_1' },
                 { id: 'sw2', label: 'Windows (nalog.ru <b>и</b> ЕСИА)', keyRef: 'setup_win_2' },
@@ -63,17 +66,19 @@ const CONSTANTS = {
             id: 'goslog', title: 'Регистрация на платформе «ГосЛог»',
             items: [
                 { id: 'gw1', label: 'Регистрация на платформе «ГосЛог» для OC Windows', keyRef: 'goslog_win' },
-                { id: 'gm1', label: 'Регистрация на платформе «ГосЛог» для OC MacOS', keyRef: 'goslog_mac' },
-                { id: 'epd_goslog_support', label: 'Настройка рабочего места и техническая поддержка по регистрации на платформе ГосЛог (для экспедиторов)', keyRef: 'epd_goslog_support' }
+                { id: 'gm1', label: 'Регистрация на платформе «ГосЛог» для OC MacOS', keyRef: 'goslog_mac' }
             ]
         },
         {
             id: 'service', title: 'Внедрение и обучение',
             items: [
-                { id: 'setup_typical', label: 'Типовая настройка', keyRef: 'typical_setup', modes: ['typical'] },
-                { id: 'setup_project',  label: 'Проектная установка', keyRef: 'project_setup', modes: ['project'] },
-                { id: 't1', label: 'Обучение (1 группа до 5 человек/час)', keyRef: 'training' },
-                { id: 'ps1', label: 'Проектное обследование (1 час)', keyRef: 'project_survey' }
+                { id: 'install_local', label: 'Установка 1С на локальный компьютер', keyRef: 'install_local', modes: ['typical'] },
+                { id: 'install_server', label: 'Установка 1С на сервер', keyRef: 'install_server', modes: ['typical'] },
+                { id: 'install_thin', label: 'Установка 1С на тонкий клиент на локальный компьютер', keyRef: 'install_thin', modes: ['typical'] },
+                { id: 'epd_training_tr', label: 'Обучение и консультация по запуску работы в 1С-ЭПД (ТР)', keyRef: 'epd_training_tr', modes: ['typical'] },
+                { id: 'setup_project', label: 'Проектная установка', keyRef: 'project_setup', modes: ['project'] },
+                { id: 'ps1', label: 'Проектное обследование (1 час)', keyRef: 'project_survey', modes: ['project'] },
+                { id: 'epd_training_pr', label: 'Обучение и консультация по запуску работы в 1С-ЭПД (ПР)', keyRef: 'epd_training_pr', modes: ['project'] }
             ]
         },
         {
@@ -83,10 +88,17 @@ const CONSTANTS = {
                 { id: 'epd_start_tr_next', label: 'Старт работы с ЭПД на 2-м и последующих рабочих местах (ТР)', keyRef: 'epd_start_tr_next', modes: ['typical'] },
                 { id: 'epd_start_pr_first', label: 'Старт работы с ЭПД на 1-м рабочем месте (ПР)', keyRef: 'epd_start_pr_first', modes: ['project'] },
                 { id: 'epd_start_pr_next', label: 'Старт работы с ЭПД на 2-м и последующих рабочих местах (ПР)', keyRef: 'epd_start_pr_next', modes: ['project'] },
-                { id: 'epd_training_tr', label: 'Обучение и консультация по запуску работы в 1С-ЭПД (ТР)', keyRef: 'epd_training_tr', modes: ['typical'] },
-                { id: 'epd_training_pr', label: 'Обучение и консультация по запуску работы в 1С-ЭПД (ПР)', keyRef: 'epd_training_pr', modes: ['project'] },
                 { id: 'epd_transition_survey', label: 'Предпроектное обследование по переходу на ЭПД', keyRef: 'epd_transition_survey', modes: ['project'] },
                 { id: 'epd_config_update', label: 'Доработка конфигурации 1С для работы с ЭПД', keyRef: 'epd_config_update', modes: ['project'] }
+            ]
+        },
+        {
+            id: 'extra_1c', title: 'Дополнительные услуги',
+            items: [
+                { id: 'update_configs', label: 'Обновление типовых конфигураций', keyRef: 'update_configs', tiered: true },
+                { id: 'migrate_fresh', label: 'Перенос базы 1С из локальной 1С во Фреш', keyRef: 'migrate_fresh' },
+                { id: 'migrate_pc', label: 'Перенос базы 1С на другой компьютер', keyRef: 'migrate_pc' },
+                { id: 'install_thin_client', label: 'Установка тонкого клиента', keyRef: 'install_thin_client' }
             ]
         }
     ],
@@ -229,6 +241,11 @@ const State = {
     getMinimumPrice(key) {
         if (!this.data.pricing[2] || !key) return 0;
         return Helpers.parseNum(this.data.pricing[2][key]);
+    },
+
+    getNextPrice(key) {
+        if (!this.data.pricing[3] || !key) return 0;
+        return Helpers.parseNum(this.data.pricing[3][key]);
     }
 };
 
@@ -385,6 +402,7 @@ const Calculator = {
             const limits = CONSTANTS.LIMITS;
             let idx = limits.findIndex(l => l >= State.data.docsYearly);
             const finalIdx = idx === -1 ? limits.length - 1 : idx;
+            const isAboveMaxLimit = idx === -1;
             
             const key = CONSTANTS.KEYS.tariffs[finalIdx];
             const limitVal = limits[finalIdx];
@@ -393,13 +411,16 @@ const Calculator = {
             const customUnit = State.data.customPrices['unit'];
             const currentUnit = customUnit !== undefined ? customUnit : stdUnit;
 
-            const effectiveDocs = State.data.customDocsCount !== null ? State.data.customDocsCount : limitVal;
+            const defaultDocsCount = isAboveMaxLimit ? State.data.docsYearly : limitVal;
+            const effectiveDocs = State.data.customDocsCount !== null ? State.data.customDocsCount : defaultDocsCount;
             const cost = effectiveDocs * currentUnit;
 
-            const displayDocs = State.data.customDocsCount !== null ? State.data.customDocsCount : limitVal;
+            const displayDocs = State.data.customDocsCount !== null ? State.data.customDocsCount : defaultDocsCount;
             const displayKey = State.data.customDocsCount !== null
                 ? `1С-ЭПД ${Helpers.fmt(displayDocs)} документов`
-                : key.replace(/\n/g, ' ');
+                : isAboveMaxLimit
+                    ? `1С-ЭПД ${Helpers.fmt(displayDocs)} документов`
+                    : key.replace(/\n/g, ' ');
 
             const line = `Тариф: ${displayKey} | ${Helpers.fmt(cost)} ₽`;
 
@@ -562,6 +583,21 @@ const Calculator = {
                             const sum = Math.max(baseSum, minimumPrice);
                             cost += sum;
                             lines.push(`${labelText} ${Helpers.fmt(price)} ₽ x ${qty} ч.: ${Helpers.fmt(sum)} ₽`);
+                        } else if (item.tiered) {
+                            const serviceKey2 = CONSTANTS.KEYS.services[item.keyRef];
+                            const nextPrice = State.getNextPrice(serviceKey2);
+                            let sum;
+                            if (qty <= 1) {
+                                sum = price;
+                            } else {
+                                sum = price + (qty - 1) * nextPrice;
+                            }
+                            cost += sum;
+                            if (qty <= 1) {
+                                lines.push(`${labelText}: ${Helpers.fmt(sum)} ₽`);
+                            } else {
+                                lines.push(`${labelText} (1 ч. × ${Helpers.fmt(price)} ₽ + ${qty-1} ч. × ${Helpers.fmt(nextPrice)} ₽): ${Helpers.fmt(sum)} ₽`);
+                            }
                         } else {
                             const sum = price * qty;
                             cost += sum;
@@ -605,10 +641,6 @@ const Calculator = {
  */
 const UI = {
     els: {},
-    isInScope(target) {
-        const panel = document.getElementById('panel-epd');
-        return !panel || panel.contains(target);
-    },
 
     init() {
         this.renderAddonsHTML();
@@ -685,12 +717,19 @@ const UI = {
                                 const minimumHours = minimumPrice > 0 && hourlyPrice > 0
                                     ? Math.ceil(minimumPrice / hourlyPrice)
                                     : 0;
-                                const unitLabel = minimumPrice > 0 ? 'ч.' : 'шт.';
+                                const isTiered = !!item.tiered;
+                                const unitLabel = minimumPrice > 0 ? 'ч.' : isTiered ? 'ч.' : 'шт.';
                                 const metaText = minimumPrice > 0
                                     ? `Почасовая работа, ${Helpers.fmt(hourlyPrice)} ₽/ч, минимум ${minimumHours} ч.`
-                                    : hasPlaceholderPrice
-                                        ? 'Цена пока не указана'
-                                        : '';
+                                    : isTiered
+                                        ? (() => {
+                                            const sk = CONSTANTS.KEYS.services[item.keyRef];
+                                            const np = State.getNextPrice(sk);
+                                            return `1-й час — ${Helpers.fmt(State.getPrice(sk))} ₽, каждый последующий — ${Helpers.fmt(np)} ₽`;
+                                          })()
+                                        : hasPlaceholderPrice
+                                            ? 'Цена пока не указана'
+                                            : '';
 
                                 return `
                                 <div class="variant-row ${minimumPrice > 0 ? 'variant-row-hourly' : ''} ${hasPlaceholderPrice ? 'variant-row-placeholder' : ''}">
@@ -1027,7 +1066,6 @@ const UI = {
         document.body.addEventListener('change', (e) => this.handleChange(e));
         document.body.addEventListener('click', (e) => this.handleClick(e));
         document.body.addEventListener('keydown', (e) => {
-            if (!this.isInScope(e.target)) return;
             const t = e.target;
             if (!t || t.dataset.digitsOnly !== 'true') return;
             if (e.ctrlKey || e.metaKey) return;
@@ -1039,7 +1077,6 @@ const UI = {
         });
 
         document.body.addEventListener('focus', (e) => {
-            if (!this.isInScope(e.target)) return;
             const t = e.target;
             if (t.type === 'number' && t.classList.contains('qty-input')) {
                 if (t.value === '0') {
@@ -1050,7 +1087,6 @@ const UI = {
     },
 
     handleInput(e) {
-        if (!this.isInScope(e.target)) return;
         const t = e.target;
         const act = t.dataset.action;
         const val = t.value;
@@ -1107,7 +1143,6 @@ const UI = {
     },
 
     handleChange(e) {
-        if (!this.isInScope(e.target)) return;
         const t = e.target;
         const act = t.dataset.action;
 
@@ -1176,7 +1211,6 @@ const UI = {
     },
 
     handleClick(e) {
-        if (!this.isInScope(e.target)) return;
         const t = e.target.closest('[data-click]');
         if (!t) return;
         
@@ -1231,11 +1265,109 @@ const UI = {
 /**
  * 6. ИНИЦИАЛИЗАЦИЯ
  */
-let __epdBootstrapped = false;
-async function bootstrapEPD() {
-    if (__epdBootstrapped) return;
-    __epdBootstrapped = true;
+window._customValidityDate = null;
 
+window._openCustomDatePicker = () => {
+    const picker = document.getElementById("kp-validity-date-picker");
+    if (!picker) return;
+    const today = new Date();
+    picker.min = today.toISOString().split("T")[0];
+    picker.value = ""; 
+    
+    picker.style.pointerEvents = "auto";
+    try {
+        picker.showPicker ? picker.showPicker() : picker.click();
+    } catch(e) {
+        picker.click();
+    }
+    picker.style.pointerEvents = "none";
+};
+
+window.toggleValidityDropdown = () => {
+    const dd = document.getElementById("kp-validity-dropdown");
+    const display = document.getElementById("kp-validity-display");
+    if (!dd) return;
+    const isOpen = dd.style.display !== "none";
+    dd.style.display = isOpen ? "none" : "block";
+    if (display) display.style.borderColor = isOpen ? "#eee" : "#7C39BF";
+};
+
+window.closeValidityDropdown = () => {
+    const dd = document.getElementById("kp-validity-dropdown");
+    const display = document.getElementById("kp-validity-display");
+    if (dd) dd.style.display = "none";
+    if (display) display.style.borderColor = "#eee";
+};
+
+window.handleValidityChange = (value) => {
+    localStorage.setItem("epd-kp-validity", value);
+    window.closeValidityDropdown();
+    
+    if (value === "custom") {
+        window._openCustomDatePicker();
+    } else {
+        window._customValidityDate = null;
+        window.updateValidityDisplay();
+    }
+};
+
+window.handleCustomDatePick = (isoValue) => {
+    if (!isoValue) return;
+    window._customValidityDate = isoValue;
+    window.updateValidityDisplay();
+};
+
+window.getValidityDate = () => {
+    const saved = localStorage.getItem("epd-kp-validity") || "30";
+    if (saved === "custom") {
+        if (window._customValidityDate) {
+            const parts = window._customValidityDate.split("-");
+            return `${parts[2]}.${parts[1]}.${parts[0]}`;
+        }
+        return "";
+    }
+    const days = parseInt(saved) || 30;
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+};
+
+window.updateValidityDisplay = () => {
+    const display = document.getElementById("kp-validity-display");
+    if (!display) return;
+    const saved = localStorage.getItem("epd-kp-validity") || "30";
+    if (saved === "custom" && window._customValidityDate) {
+        const parts = window._customValidityDate.split("-");
+        display.textContent = `До ${parts[2]}.${parts[1]}.${parts[0]}`;
+        display.style.color = "#7C39BF";
+    } else if (saved !== "custom") {
+        const days = parseInt(saved) || 30;
+        const d = new Date();
+        d.setDate(d.getDate() + days);
+        const dateStr = d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+        display.textContent = `До ${dateStr}`;
+        display.style.color = "#7C39BF";
+    } else {
+        display.textContent = "30 дней";
+        display.style.color = "";
+    }
+};
+
+// Алиас для совместимости с downloadKP
+window.updateValidityDate = window.updateValidityDisplay;
+
+// Закрывать дропдаун при клике вне
+document.addEventListener('click', (e) => {
+    const display = document.getElementById('kp-validity-display');
+    const dd = document.getElementById('kp-validity-dropdown');
+    if (!display || !dd) return;
+    if (!display.contains(e.target) && !dd.contains(e.target)) {
+        window.closeValidityDropdown();
+    }
+});
+
+
+document.addEventListener('DOMContentLoaded', async () => {
     State.initAddons();
     State.initExtraServices();
     UI.init();
@@ -1254,95 +1386,29 @@ async function bootstrapEPD() {
         }
     });
 
-    const getScriptBaseUrl = () => {
-        const script = Array.from(document.scripts).find(s => /epd-calc-script\.js(?:$|\?)/i.test(s.src || ''));
-        if (!script || !script.src) return null;
-        try {
-            return new URL('.', script.src);
-        } catch {
-            return null;
-        }
-    };
+    localStorage.setItem('epd-kp-validity', '30'); 
 
-    const getPriceFileCandidates = () => {
-        const globalPriceNames =
-            window.__CALC_APP_RESOURCES &&
-            window.__CALC_APP_RESOURCES.prices &&
-            window.__CALC_APP_RESOURCES.prices.epd;
-        const names = Array.isArray(globalPriceNames) && globalPriceNames.length
-            ? globalPriceNames
-            : ['epd-tariffs.json'];
-        const urls = [];
+    window._customValidityDate = null;
+    localStorage.removeItem('epd-kp-custom-date'); 
 
-        names.forEach(name => {
-            urls.push(name);
-            urls.push(`./${name}`);
-            urls.push(encodeURI(name));
-            urls.push(`./${encodeURI(name)}`);
-        });
-
-        const scriptBase = getScriptBaseUrl();
-        if (scriptBase) {
-            names.forEach(name => {
-                urls.push(new URL(name, scriptBase).href);
-                urls.push(new URL(encodeURI(name), scriptBase).href);
-            });
-        }
-
-        return [...new Set(urls)];
-    };
-
-    let loaded = false;
+    window.updateValidityDisplay();
 
     try {
-        if (window.__CALC_PRELOAD_PRICES_PROMISE) {
-            await window.__CALC_PRELOAD_PRICES_PROMISE;
+        const res = await fetch('Цены для калькулятора ЭПД.json');
+        const text = await res.text();
+        try {
+            State.data.pricing = JSON.parse(text);
+        } catch(e) {
+            State.data.pricing = JSON.parse("[" + text.replace(/}\s*{/g, "},{") + "]");
         }
-    } catch {}
-
-    const preloaded = window.__CALC_PRELOADED_DATA && window.__CALC_PRELOADED_DATA.epd;
-    if (Array.isArray(preloaded)) {
-        State.data.pricing = preloaded;
-        loaded = true;
-    } else if (preloaded && typeof preloaded === 'object' && !Array.isArray(preloaded) && Object.keys(preloaded).length) {
-        State.data.pricing = [preloaded];
-        loaded = true;
-    } else {
-        const candidates = getPriceFileCandidates();
-        for (const url of candidates) {
-            try {
-                const res = await fetch(url, { cache: 'no-store' });
-                if (!res.ok) continue;
-
-                const text = await res.text();
-                const trimmed = text.trim();
-                try {
-                    State.data.pricing = JSON.parse(trimmed);
-                } catch (e1) {
-                    try {
-                        State.data.pricing = JSON.parse(`[${trimmed}]`);
-                    } catch (e2) {
-                        State.data.pricing = JSON.parse("[" + trimmed.replace(/}\s*,?\s*{/g, "},{") + "]");
-                    }
-                }
-
-                loaded = true;
-                break;
-            } catch (e) {
-            }
-        }
+        UI.renderAddonsHTML();
+        UI.update(); 
+    } catch (e) { 
+        console.error("Ошибка загрузки цен", e); 
     }
+});
 
-    UI.update();
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bootstrapEPD);
-} else {
-    bootstrapEPD();
-}
-
-window.downloadKPEPD = async () => {
+window.downloadKP = async () => {
     const result = Calculator.calculateAll();
     if (result.total === 0) {
         alert('Сначала сделайте расчет!');
@@ -1386,7 +1452,7 @@ window.downloadKPEPD = async () => {
         if (m) {
             const nameAndQty = m[1].trim();
             const totalPriceStr = m[2].trim() + ' ₽';
-            const crossIdx = nameAndQty.lastIndexOf('×');
+            const crossIdx = Math.max(nameAndQty.lastIndexOf('×'), nameAndQty.lastIndexOf('x'));
             if (crossIdx !== -1) {
                 const pkgName = nameAndQty.slice(0, crossIdx).trim();
                 const qty = nameAndQty.slice(crossIdx + 1).trim();
@@ -1405,11 +1471,20 @@ window.downloadKPEPD = async () => {
         return null;
     }
 
-    const PRICE_RE = /(\d[\d\s]*[\d])\s*[РрPp₽руб\.]+\s*$/i;
+    const PRICE_RE = /(\d(?:[\d\s]*\d)?)\s*[РрPp₽руб\.]+\s*$/i;
 
     function parseLine(line) {
         const tariffParsed = parseTariffPackageLine(line, result.tariffPackages);
         if (tariffParsed) return tariffParsed;
+
+        const detailedLine = line.match(/^(.+?)\s+(\d(?:[\d\s]*\d)?)\s*₽\s*[x×]\s*(\d+)(?:\s*(ч\.))?\s*:\s*(\d(?:[\d\s]*\d)?)\s*₽$/i);
+        if (detailedLine) {
+            const [, title, unitPrice, qty, unit, totalPrice] = detailedLine;
+            return {
+                title: `${title.trim()} ${unitPrice.trim()} ₽ × ${qty}${unit ? ` ${unit}` : ''}`,
+                price: `${totalPrice.trim()} ₽`
+            };
+        }
 
         if (line.includes('|')) {
             const parts = line.split('|');
@@ -1420,7 +1495,7 @@ window.downloadKPEPD = async () => {
             const after = line.slice(colonIdx + 1).trim();
             if (PRICE_RE.test(after)) return { title: line.slice(0, colonIdx).trim(), price: after };
         }
-        const m = line.match(/^(.+?)\s{2,}(\d[\d\s]*[\d]\s*[РрPp₽руб\.]+)\s*$/i);
+        const m = line.match(/^(.+?)\s{2,}(\d(?:[\d\s]*\d)?\s*[РрPp₽руб\.]+)\s*$/i);
         if (m) return { title: m[1].trim(), price: m[2].trim() };
         return { title: line, price: null };
     }
@@ -1428,35 +1503,41 @@ window.downloadKPEPD = async () => {
     function buildRows(arr) {
         return arr.map(line => {
             const { title, price } = parseLine(line);
+            const safeTitle = Helpers.escapeHtml(title);
+            const safePrice = price ? Helpers.escapeHtml(price) : null;
             if (price) {
                 return `<tr>
-                    <td style="padding:6px 8px 6px 0;font-size:9.5pt;color:#1a1a2e;border-bottom:1px solid #ede8ff;word-break:break-word;max-width:360px;line-height:1.4;">${title}</td>
-                    <td style="padding:6px 0 6px 8px;text-align:right;font-weight:700;color:#7c3aed;font-size:9.5pt;white-space:nowrap;border-bottom:1px solid #ede8ff;vertical-align:top;">${price}</td>
+                    <td style="padding:6px 8px 6px 0;font-size:9.5pt;color:#1a1a2e;border-bottom:1px solid #ede8ff;word-break:break-word;max-width:360px;line-height:1.4;">${safeTitle}</td>
+                    <td style="padding:6px 0 6px 8px;text-align:right;font-weight:700;color:#7c3aed;font-size:9.5pt;white-space:nowrap;border-bottom:1px solid #ede8ff;vertical-align:top;">${safePrice}</td>
                 </tr>`;
             }
             return `<tr>
-                <td colspan="2" style="padding:6px 0;font-size:9.5pt;color:#1a1a2e;border-bottom:1px solid #ede8ff;word-break:break-word;line-height:1.4;">${title}</td>
+                <td colspan="2" style="padding:6px 0;font-size:9.5pt;color:#1a1a2e;border-bottom:1px solid #ede8ff;word-break:break-word;line-height:1.4;">${safeTitle}</td>
             </tr>`;
         }).join('');
     }
 
     function buildSingleRow(line) {
         const { title, price } = parseLine(line);
+        const safeTitle = Helpers.escapeHtml(title);
+        const safePrice = price ? Helpers.escapeHtml(price) : null;
         if (price) {
             return `<tr>
-                <td style="padding:6px 8px 6px 0;font-size:9.5pt;color:#1a1a2e;border-bottom:1px solid #ede8ff;word-break:break-word;max-width:360px;line-height:1.4;">${title}</td>
-                <td style="padding:6px 0 6px 8px;text-align:right;font-weight:700;color:#7c3aed;font-size:9.5pt;white-space:nowrap;border-bottom:1px solid #ede8ff;vertical-align:top;">${price}</td>
+                <td style="padding:6px 8px 6px 0;font-size:9.5pt;color:#1a1a2e;border-bottom:1px solid #ede8ff;word-break:break-word;max-width:360px;line-height:1.4;">${safeTitle}</td>
+                <td style="padding:6px 0 6px 8px;text-align:right;font-weight:700;color:#7c3aed;font-size:9.5pt;white-space:nowrap;border-bottom:1px solid #ede8ff;vertical-align:top;">${safePrice}</td>
             </tr>`;
         }
         return `<tr>
-            <td colspan="2" style="padding:6px 0;font-size:9.5pt;color:#1a1a2e;border-bottom:1px solid #ede8ff;word-break:break-word;line-height:1.4;">${title}</td>
+            <td colspan="2" style="padding:6px 0;font-size:9.5pt;color:#1a1a2e;border-bottom:1px solid #ede8ff;word-break:break-word;line-height:1.4;">${safeTitle}</td>
         </tr>`;
     }
 
+    const validityDate = window.getValidityDate ? window.getValidityDate() : "";
     const summaryBlock = `
         <div style="background:#f3f0ff;border-radius:10px;padding:16px 28px;margin-top:14px;text-align:center;">
-            <div style="font-size:9.5pt;color:#6d28d9;margin-bottom:6px;">Стоимость для ${clientName}:</div>
+            <div style="font-size:9.5pt;color:#6d28d9;margin-bottom:4px;">Стоимость для ${clientName}:</div>
             <div style="font-size:20pt;font-weight:800;color:#7c3aed;letter-spacing:-0.5px;">${Helpers.fmt(result.total)} ₽</div>
+            ${validityDate ? `<div style="font-size:8pt;color:#888;margin-top:8px;">Предложение действительно до ${validityDate}</div>` : ""}
         </div>`;
 
     const contactBlock = `
@@ -1715,6 +1796,15 @@ window.downloadKPEPD = async () => {
         return canvas;
     }
 
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(30,0,60,0.5);z-index:99998;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = `
+        <div style="background:#fff;padding:28px 40px;border-radius:14px;text-align:center;font-family:Arial,sans-serif;">
+            <div style="font-size:26px;margin-bottom:10px;">📄</div>
+            <div style="font-size:14px;font-weight:600;color:#6d28d9;">Создаём PDF...</div>
+        </div>`;
+    document.body.appendChild(overlay);
+
     try {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' });
@@ -1738,7 +1828,10 @@ window.downloadKPEPD = async () => {
         doc.save(`КП Астрал.ЭПД для ${clientName}.pdf`);
 
     } catch (err) {
+        console.error('Ошибка PDF:', err);
         alert(`Ошибка создания PDF: ${err.message}`);
+    } finally {
+        document.body.removeChild(overlay);
     }
 };
 
@@ -1767,5 +1860,3 @@ window.updateCustomPrice = (key, value) => {
     document.getElementById('total-price').textContent = Helpers.fmt(result.total) + ' ₽';
     document.getElementById('details-content').innerHTML = result.lines.map(line => Helpers.escapeHtml(line)).join('<br>');
 };
-
-})();

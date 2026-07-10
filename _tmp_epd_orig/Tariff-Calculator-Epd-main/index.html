@@ -4,9 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Помощник подбора тарифов 1С-ЭПД</title>
-    <link rel="icon" href="data:,">
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="epd-calc-style.css">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <header class="page-title">
@@ -222,10 +221,44 @@
                            onfocus="this.style.borderColor='#7C39BF'" 
                            onblur="this.style.borderColor='#eee'">
                 </div>
+                <div>
+                    <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text);">Актуальность КП</label>
+                    <div style="position: relative;">
+                        <!-- Видимое поле -->
+                        <div id="kp-validity-display"
+                             onclick="window.toggleValidityDropdown()"
+                             style="width: 100%; padding: 12px 36px 12px 12px; border: 2px solid #eee; border-radius: 10px; font-family: inherit; font-size: 14px; background: #fff; cursor: pointer; box-sizing: border-box; transition: border-color 0.3s; user-select: none;">
+                            30 дней
+                        </div>
+                        <!-- Стрелка -->
+                        <div style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="8" viewBox="0 0 12 8"><path fill="#7C39BF" d="M1 1l5 5 5-5"/></svg>
+                        </div>
+                        <!-- Кастомный дропдаун -->
+                        <div id="kp-validity-dropdown"
+                             style="display: none; position: absolute; top: calc(100% + 4px); left: 0; width: 100%; background: #fff; border: 2px solid #7C39BF; border-radius: 10px; z-index: 100; overflow: hidden; box-shadow: 0 4px 16px rgba(124,57,191,0.12);">
+                            <div onclick="window.handleValidityChange('30')"
+                                 style="padding: 12px; font-size: 14px; cursor: pointer; transition: background 0.15s;"
+                                 onmouseover="this.style.background='#f5eeff'" onmouseout="this.style.background=''">
+                                30 дней
+                            </div>
+                            <div onclick="window.handleValidityChange('custom')"
+                                 style="padding: 12px; font-size: 14px; cursor: pointer; border-top: 1px solid #eee; transition: background 0.15s;"
+                                 onmouseover="this.style.background='#f5eeff'" onmouseout="this.style.background=''">
+                                Другое...
+                            </div>
+                        </div>
+                        <!-- Скрытый нативный date input -->
+                        <input type="date" id="kp-validity-date-picker"
+                               style="position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; top: 0; left: 0;"
+                               onchange="window.handleCustomDatePick(this.value)">
+                    </div>
+                </div>
+            
             </div>
         </div>
 
-        <div class="kp-container" onclick="window.downloadKPEPD && window.downloadKPEPD()">
+        <div class="kp-container" onclick="window.downloadKP()">
             <div class="total-bar">
                 <div class="total-info">
                     <span class="kp-label">Скачать коммерческое предложение</span>
@@ -241,6 +274,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="epd-calc-script.js"></script>
+    <script src="script.js"></script>
 </body>
 </html>

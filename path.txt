@@ -1,0 +1,48 @@
+prices: {
+                '1co': ['/upload/iblock/ef1/odzjkdxia4w142uyyxm4b4bmu33r87s6/1co_tariffs.json'],
+                'epd': ['/upload/iblock/16e/nz50306oetv02pel99oeiyo1dqiok4ey/epd_tariffs.json'],
+                'ikedo': ['/upload/iblock/c0a/69flth1ju4lexvc1zghk3u6okz52dw62/iKedo_tafiffs.json'],
+                'ao5': ['/upload/iblock/728/48whop8n2hc7a8fqxe2112rtahg0tyu8/ao5_tariffs.json']
+            },
+            images: [
+                // 1СО
+                '/upload/iblock/632/tstb4eafypm76y3gd9idf77lwfooooqc/1co_pdf_header.jpg',
+                '/upload/iblock/6c6/7sn918poajjh07kc0lqsxj1vqr15qb68/1co_pdf_footer_1.jpg',
+                '/upload/iblock/060/qz6nwenhd3j5951oo7q92iyl1636dubq/1co_pdf_footer_2.jpg',
+                '/upload/iblock/94c/6qeacxw40gzluo3p1nr52tllb6jrzdnq/1co_pdf_footer_3.jpg',
+                '/upload/iblock/56a/3p0pyam92kbein0ub2c61qo90crp8lf0/1co_pdf_footer_4.jpg',
+                '/upload/iblock/b41/3f5dp8mwacdmphv3qi61007i5wlxjhoh/1co_pdf_footer_5.jpg',
+                '/upload/iblock/2dc/sbp0ej7el57tqxr4ztcj0v7ykbh0nkyl/1co_pdf_footer_6.jpg',
+
+                // ЭПД
+                '/upload/iblock/1d9/k8tucvulyyj01lv2nidkd0sg4wjxtfex/epd_pdf_base_header.jpg',
+                '/upload/iblock/48c/3elnoot9irnjwf80s123dqijd3jzrh6m/epd_pdf_base_middle.jpg',
+                '/upload/iblock/789/csaam3fi1dli3kz0vrn6km6609433xxd/epd_pdf_base_footer.jpg',
+                '/upload/iblock/fa4/kyq2k81ob1hk5ln4ogn4asmuv957g4in/epd_pdf_project_header.jpg',
+                '/upload/iblock/c8f/l05umstx86aca24v4azq2qo08usjech7/epd_pdf_project_middle.jpg',
+                '/upload/iblock/789/csaam3fi1dli3kz0vrn6km6609433xxd/epd_pdf_project_footer.jpg',
+
+                // iКЭДО
+                '/upload/iblock/81c/2jvz06avvf7ue6uak1eg9suyvfy95nqw/ikedo_pdf_header.jpg',
+                '/upload/iblock/745/szxlpbaguyg1dv2c9lt1g8mev1j3n0kn/ikedo_pdf_footer_1.jpg',
+                '/upload/iblock/231/ejqq0ninibf564kdtb848boek5qw9umt/ikedo_pdf_footer_2.jpg',
+
+                // АО5
+                '/upload/iblock/acf/ur2isoxz6dx642x5ebdym5aysytndjoq/pdf_header_main.jpg',
+                '/upload/iblock/a96/w4nt8o01n8m9j3zhnh4gd08bl3ckkidk/pdf_header_ub.png',
+                '/upload/iblock/a95/p9d02roxs4vsqftqeahfdzsnr4p74bst/pdf_footer_main_1.jpg',
+                '/upload/iblock/992/qqj5njvzfg424m26tkulk7szjvyaeqri/pdf_footer_main_2.jpg',
+                '/upload/iblock/f2b/nkxv593oiqaxtx1c5edt3r99q57g6koq/pdf_footer_main_3.jpg',
+                '/upload/iblock/874/lu8vnpn0zp0kw124da0p2qq89jilc0qi/pdf_footer_main_4.jpg',
+                '/upload/iblock/16e/iyxtfsbwstbh0i3noqyp83et3us85q19/pdf_footer_main_5.jpg',
+                '/upload/iblock/542/iicycvvnn2yeo31bgccmgx297j204bas/pdf_footer_main_6.jpg',
+                '/upload/iblock/4f9/aqwq1ec1yuk5umkhq6rt8cad7kgn9jw2/pdf_footer_main_7.jpg',
+                '/upload/iblock/e83/a6y8jv00ab1ziejxn9ulskqcm6fdywja/pdf_footer_ub_1.jpg',
+                '/upload/iblock/9b4/kmo169opxth96hit9dt1lw5kzpr3lyhk/pdf_footer_ub_2.jpg',
+                '/upload/iblock/611/b01621cn1f6kokkg61fg7hkfdnhmx5b3/pdf_footer_ub_3.jpg',
+                '/upload/iblock/794/1hojibml6bywe15pom2gfqx64fu5merg/pdf_footer_ub_4.jpg',
+                '/upload/iblock/537/x7ry0kha666crcqxddkyun7pplw4le1q/pdf_footer_ub_5.jpg',
+                '/upload/iblock/184/191d4cv3p5gkqbl0ddeyvnkqrtxzuv2y/pdf_footer_ub_6.jpg',
+                '/upload/iblock/d2b/1ri0hpecnp94m0h3tu70y13j7058pdrb/pdf_footer_ub_7.jpg'
+            ]
+        };

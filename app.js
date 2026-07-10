@@ -1,0 +1,5266 @@
+/**
+ * КАЛЬКУЛЯТОР 1С-ОТЧЕТНОСТЬ
+ * Изолированная версия с глобальным объектом CalcApp
+ */
+
+(function() {
+'use strict';
+
+const CONFIG = {
+    columns: {
+        ul_base: 'ЮЛ',
+        ip_base: 'ИП',
+        ul_2year: 'Column4',
+        ip_2year: 'Column13',
+        multi_small: 'Многопользовательский режим',
+        multi_large: 'Column29',
+        lk_base: 'Column31',
+        lk_base_nogk: 'ЛК Базовый (1 год)',
+        lk_prof: 'Column33',
+        lk_prof_nogk: 'ЛК Проф(1 год)',
+        mchd_1: 'Старт работы с МЧД в 1С-Отчетность',
+        mchd_2: 'Column37',
+        mchd_3: 'Column38',
+        setup_1: 'Удалённая настройка рабочего места для работы с электронной подписью',
+        setup_2: 'Column40',
+        setup_3: 'Column41',
+        setup_4: 'Column42'
+    },
+    globalAddons: [
+        {
+            id: 'mchd',
+            title: 'Старт работы с МЧД в 1С-Отчетность',
+            items: [
+                { id: 'v1', label: 'Старт работы с МЧД в 1С-Отчетность (1 МЧД)', col: 'mchd_1' },
+                { id: 'v2', label: 'Старт работы с МЧД в 1С-Отчетность (2 МЧД)', col: 'mchd_2' },
+                { id: 'v3', label: 'Старт работы с МЧД в 1С-Отчетность (3 МЧД)', col: 'mchd_3' }
+            ]
+        },
+        {
+            id: 'setup',
+            title: 'Удалённая настройка рабочего места',
+            items: [
+                { id: 's1', label: 'Удалённая настройка рабочего места для OC Windows (nalog.ru или ЕСИА)', col: 'setup_1' },
+                { id: 's2', label: 'Удалённая настройка рабочего места для OC Windows (nalog.ru и ЕСИА)', col: 'setup_2' },
+                { id: 's3', label: 'Удалённая настройка рабочего места для OC MacOS (nalog.ru или ЕСИА)', col: 'setup_3' },
+                { id: 's4', label: 'Удалённая настройка рабочего места для OC MacOS (nalog.ru и ЕСИА)', col: 'setup_4' }
+            ]
+        }
+    ],
+    extraServices: [
+        { key: 'lk', val: 'base', col: 'lk_base', colNoGk: 'lk_base_nogk', label: 'ЛК Базовый' },
+        { key: 'lk', val: 'prof', col: 'lk_prof', colNoGk: 'lk_prof_nogk', label: 'ЛК Проф' },
+        { key: 'multiUser', val: 'small', col: 'multi_small', label: 'Многопользовательский режим (2-9)' },
+        { key: 'multiUser', val: 'large', col: 'multi_large', label: 'Многопользовательский режим (10+)' }
+    ],
+    getAssetPath(type) {
+        const assets = document.getElementById('calc-assets');
+        if (!assets) return '';
+        return assets.dataset[type + 'Img'] || '';
+    }
+};
+const STATE = {
+    tariffs: [],
+    tariffMap: {},
+    isGroup: false,
+    mode: 'fast',
+    existingCount: 0,
+    solo: { region: '', ownership: 'ul', duration: '1', lk: 'none', multiUser: 'none', lkMonths: 12, multiMonths: 12, lkGroup: false },
+    fastRows: [{ id: Date.now(), region: '', ulCount: 1, ipCount: 0 }],
+    detailedCompanies: [{ id: Date.now(), name: '', inn: '', region: '', ownership: 'ul', lk: 'none', multiUser: 'none', multiMonths: 12, lkMonths: 12, lkGroup: false }],
+    manualDiscount: { type: 'percent', value: 0 },
+    addons: {},
+    customPrices: {}
+};
+
+CONFIG.globalAddons.forEach(g => {
+    STATE.addons[g.id] = { enabled: false, values: {} };
+    g.items.forEach(i => STATE.addons[g.id].values[i.id] = 0);
+});
+
+const formatPrice = (v) => Math.round(v).toLocaleString('ru-RU') + ' ₽';
+
+// Разбирает значение поля: число месяцев или дата (вычисляет месяцы от сегодня)
+function parseMultiMonths(val) {
+    if (!val || val === '') return 12;
+    const s = val.toString().trim();
+    // Дата в формате DD.MM.YYYY или YYYY-MM-DD или MM/DD/YYYY
+    const dateMatch = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/) || s.match(/^(\d{4})-(\d{2})-(\d{2})$/) || s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (dateMatch) {
+        let target;
+        if (s.includes('.')) {
+            const [, d, m, y] = dateMatch;
+            target = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+        } else if (s.includes('-')) {
+            const [, y, m, d] = dateMatch;
+            target = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+        } else {
+            const [, m, d, y] = dateMatch;
+            target = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+        }
+        const now = new Date();
+        const months = (target.getFullYear() - now.getFullYear()) * 12 + (target.getMonth() - now.getMonth());
+        return Math.max(1, months);
+    }
+    const n = parseInt(s);
+    return isNaN(n) || n < 1 ? 12 : n;
+}
+
+const parsePriceValue = (val) => {
+    if (typeof val === 'number' && Number.isFinite(val)) return val;
+    if (val === null || val === undefined) return 0;
+    const normalized = val.toString().replace(/\u00A0/g, '').replace(/\s/g, '').replace(',', '.');
+    const num = parseFloat(normalized);
+    return Number.isFinite(num) ? num : 0;
+};
+
+const getPrice = (tariff, configKey) => {
+    const columnName = CONFIG.columns[configKey];
+    return parsePriceValue(tariff[columnName]);
+};
+
+const getRegionOptions = (selected) => {
+    let options = `<option value="" ${!selected ? 'selected' : ''} disabled>Выберите регион</option>`;
+    options += STATE.tariffs.map(t => `<option value="${t["Код"]}" ${selected == t["Код"] ? 'selected' : ''}>${t["Регион"]}</option>`).join('');
+    return options;
+};
+
+function init() {
+    const fields = ['partner-phone', 'partner-email', 'partner-name'];
+    fields.forEach(id => {
+        const saved = localStorage.getItem(`p-${id}`);
+        const el = document.getElementById(`calc-${id}`);
+        if (saved && el) el.value = saved;
+        if (el) el.oninput = (e) => localStorage.setItem(`p-${id}`, e.target.value);
+    });
+
+    const modal = document.getElementById('calc-months-modal');
+    if (modal) modal.onclick = (e) => { if (e.target === modal) CalcApp.closeMonthsCalc(); };
+
+    ['calc-mc-license-end', 'calc-mc-connect-date'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('keydown', (e) => { if (e.key === 'Enter') CalcApp.calcMonths(); });
+    });
+
+    const savedPrices = localStorage.getItem('my_custom_prices');
+    if (savedPrices) {
+        try { STATE.customPrices = JSON.parse(savedPrices); }
+        catch (e) { STATE.customPrices = {}; }
+    }
+
+    const discType = document.getElementById('calc-manual-disc-type');
+    const discVal = document.getElementById('calc-manual-disc-val');
+    if (discType) discType.onchange = (e) => { STATE.manualDiscount.type = e.target.value; validateManualDiscount(discVal); calculate(); };
+    if (discVal) discVal.oninput = (e) => { validateManualDiscount(e.target); STATE.manualDiscount.value = parseFloat(e.target.value) || 0; calculate(); };
+
+    setupEventListeners();
+    setupDateAutoformat();
+    loadData();
+}
+
+function validateManualDiscount(input) {
+    if (!input) return;
+    if (STATE.manualDiscount.type === 'percent') {
+        let val = parseFloat(input.value);
+        if (val < 0) input.value = 0;
+        if (val > 100) input.value = 100;
+    }
+}
+
+function getScriptBaseUrl() {
+    const script = Array.from(document.scripts).find(s =>
+        /(?:1co-calc-script|app)\.js(?:$|\?)/i.test(s.src || '')
+    );
+    if (!script || !script.src) return null;
+    try {
+        return new URL('.', script.src);
+    } catch {
+        return null;
+    }
+}
+
+function getPriceFileCandidates(calcKey, defaultFile) {
+    const globalPriceNames =
+        window.__CALC_APP_RESOURCES &&
+        window.__CALC_APP_RESOURCES.prices &&
+        window.__CALC_APP_RESOURCES.prices[calcKey];
+    const names = Array.isArray(globalPriceNames) && globalPriceNames.length
+        ? globalPriceNames
+        : [defaultFile];
+    const urls = [];
+
+    names.forEach(name => {
+        urls.push(name);
+        urls.push(`./${name}`);
+        urls.push(encodeURI(name));
+        urls.push(`./${encodeURI(name)}`);
+    });
+
+    const scriptBase = getScriptBaseUrl();
+    if (scriptBase) {
+        names.forEach(name => {
+            urls.push(new URL(name, scriptBase).href);
+            urls.push(new URL(encodeURI(name), scriptBase).href);
+        });
+    }
+
+    return [...new Set(urls)];
+}
+
+async function loadData() {
+    let loaded = false;
+
+    try {
+        try {
+            if (window.__CALC_PRELOAD_PRICES_PROMISE) {
+                await window.__CALC_PRELOAD_PRICES_PROMISE;
+            }
+        } catch {}
+
+        const preloaded = window.__CALC_PRELOADED_DATA && window.__CALC_PRELOADED_DATA['1co'];
+        const preloadedTariffs =
+            preloaded && typeof preloaded === 'object' && !Array.isArray(preloaded)
+                ? preloaded["Тарифы по регионам"]
+                : null;
+        if (Array.isArray(preloadedTariffs)) {
+            const regionTariffs = preloadedTariffs;
+            STATE.tariffs = regionTariffs.filter(t => t && t["Код"] && t["Регион"]);
+            STATE.tariffMap = Object.fromEntries(STATE.tariffs.map(t => [t["Код"], t]));
+            loaded = true;
+        } else {
+            const candidates = getPriceFileCandidates('1co', '1co-tariffs.json');
+            for (const url of candidates) {
+                try {
+                const res = await fetch(url, { cache: 'no-store' });
+                if (!res.ok) continue;
+                const data = await res.json();
+                const regionTariffs = Array.isArray(data["Тарифы по регионам"]) ? data["Тарифы по регионам"] : [];
+                STATE.tariffs = regionTariffs.filter(t => t && t["Код"] && t["Регион"]);
+                STATE.tariffMap = Object.fromEntries(STATE.tariffs.map(t => [t["Код"], t]));
+                loaded = true;
+                break;
+            } catch (e) {
+            }
+        }
+        }
+
+        if (!loaded) {
+            console.error('Ошибка загрузки данных: файл с ценами не найден или содержит ошибку.');
+        }
+    } finally {
+        render();
+    }
+}
+
+function setupEventListeners() {
+    const groupBtns = document.querySelectorAll('#calc-group-main-toggle .calc-toggle-btn');
+    groupBtns.forEach(btn => {
+        btn.onclick = (e) => {
+            groupBtns.forEach(b => b.classList.remove('calc-selected'));
+            e.target.classList.add('calc-selected');
+            STATE.isGroup = e.target.dataset.value === 'yes';
+            if (STATE.isGroup) {
+                STATE.detailedCompanies.forEach(c => { c.lkGroup = true; });
+            }
+            const container = document.getElementById('calc-mode-selection-container');
+            if (container) container.style.display = STATE.isGroup ? 'block' : 'none';
+            render();
+        };
+    });
+    const tabBtns = document.querySelectorAll('.calc-tab-btn');
+    tabBtns.forEach(btn => {
+        btn.onclick = (e) => {
+            tabBtns.forEach(b => b.classList.remove('calc-selected'));
+            e.target.classList.add('calc-selected');
+            STATE.mode = e.target.dataset.mode;
+            render();
+        };
+    });
+
+    // Стартовая синхронизация STATE с отмеченными в HTML кнопками
+    const selectedGroupBtn = document.querySelector('#calc-group-main-toggle .calc-toggle-btn.calc-selected');
+    STATE.isGroup = selectedGroupBtn ? selectedGroupBtn.dataset.value === 'yes' : false;
+
+    const selectedModeBtn = document.querySelector('.calc-tab-btn.calc-selected');
+    if (selectedModeBtn && selectedModeBtn.dataset.mode) {
+        STATE.mode = selectedModeBtn.dataset.mode;
+    }
+
+    const modeContainer = document.getElementById('calc-mode-selection-container');
+    if (modeContainer) {
+        modeContainer.style.display = STATE.isGroup ? 'block' : 'none';
+    }
+}
+
+function render() {
+    const container = document.getElementById('calc-dynamic-fields');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!STATE.isGroup) {
+        renderSoloMode(container);
+    } else {
+        if (STATE.mode === 'addon') renderDetailedMode(container, true);
+        else if (STATE.mode === 'detailed') renderDetailedMode(container, false);
+        else renderFastGroupMode(container);
+    }
+    renderGlobalAddons();
+    calculate();
+}
+
+function renderSoloMode(container) {
+    const tpl = document.getElementById('calc-tpl-solo-mode');
+    if (!tpl) return;
+    const content = tpl.content.cloneNode(true);
+    const regSelect = content.getElementById('calc-s-reg');
+    if (regSelect) {
+        regSelect.innerHTML = getRegionOptions(STATE.solo.region);
+        regSelect.onchange = (e) => CalcApp.updateSolo('region', e.target.value);
+    }
+    content.querySelectorAll('#calc-solo-ownership .calc-toggle-btn').forEach(b => {
+        if (b.dataset.val === STATE.solo.ownership) b.classList.add('calc-selected');
+        b.onclick = () => CalcApp.updateSolo('ownership', b.dataset.val);
+    });
+    content.querySelectorAll('#calc-solo-duration .calc-toggle-btn').forEach(b => {
+        if (b.dataset.val === STATE.solo.duration) b.classList.add('calc-selected');
+        b.onclick = () => CalcApp.updateSolo('duration', b.dataset.val);
+    });
+    content.querySelectorAll('#calc-solo-lk-group .calc-toggle-btn').forEach(b => {
+        if (b.dataset.val === STATE.solo.lk) b.classList.add('calc-selected');
+        b.onclick = () => CalcApp.toggleSoloOption('lk', b.dataset.val);
+    });
+    content.querySelectorAll('#calc-solo-multi-group .calc-toggle-btn').forEach(b => {
+        if (b.dataset.val === STATE.solo.multiUser) b.classList.add('calc-selected');
+        b.onclick = () => CalcApp.toggleSoloOption('multiUser', b.dataset.val);
+    });
+
+    container.appendChild(content);
+}
+function renderFastGroupMode(container) {
+    const tpl = document.getElementById('calc-tpl-fast-mode');
+    if (!tpl) return;
+    const content = tpl.content.cloneNode(true);
+    const rowsCont = content.getElementById('calc-f-rows');
+    STATE.fastRows.forEach(row => {
+        const div = document.createElement('div');
+        div.style = "display: grid; grid-template-columns: 2fr 1fr 1fr 40px; gap: 10px; margin-bottom: 8px; align-items: center;";
+        div.innerHTML = `
+            <select onchange="CalcApp.updateFast(${row.id},'region',this.value)">${getRegionOptions(row.region)}</select>
+            <input type="number" value="${row.ulCount}" oninput="CalcApp.updateFast(${row.id},'ulCount',this.value)" style="text-align: center;">
+            <input type="number" value="${row.ipCount}" oninput="CalcApp.updateFast(${row.id},'ipCount',this.value)" style="text-align: center;">
+            <button onclick="CalcApp.removeFast(${row.id})" style="color:#ccc; background:none; border:none; font-size:24px; cursor:pointer;">&times;</button>`;
+        rowsCont.appendChild(div);
+    });
+    container.appendChild(content);
+}
+
+function renderDetailedMode(container, showExisting) {
+    const mainTpl = document.getElementById('calc-tpl-detailed-mode');
+    if (!mainTpl) return;
+    const content = mainTpl.content.cloneNode(true);
+    if (showExisting) {
+        const row = content.getElementById('calc-existing-count-row');
+        if (row) row.style.display = 'flex';
+        const inp = content.getElementById('calc-existing-input');
+        if (inp) {
+            inp.value = STATE.existingCount;
+            inp.oninput = (e) => { STATE.existingCount = parseInt(e.target.value) || 0; calculate(); };
+        }
+    }
+    const cardsContainer = content.getElementById('calc-det-cards');
+    STATE.detailedCompanies.forEach((comp, idx) => {
+        const cardTpl = document.getElementById('calc-tpl-company-card');
+        if (!cardTpl) return;
+        const cardContent = cardTpl.content.cloneNode(true);
+        const nameInp = cardContent.querySelector('.calc-comp-name-input');
+        nameInp.value = comp.name;
+        nameInp.oninput = (e) => CalcApp.updateDet(comp.id, 'name', e.target.value, false);
+        const innInp = cardContent.querySelector('.calc-comp-inn-input');
+        innInp.value = comp.inn;
+        innInp.style.borderColor = (comp.inn.length === 0 || [10, 12].includes(comp.inn.length)) ? '' : 'red';
+        innInp.oninput = (e) => CalcApp.updateDet(comp.id, 'inn', e.target.value, false);
+        const regSel = cardContent.querySelector('.calc-comp-region-select');
+        regSel.innerHTML = getRegionOptions(comp.region);
+        regSel.onchange = (e) => CalcApp.updateDet(comp.id, 'region', e.target.value);
+        cardContent.querySelectorAll('.calc-ownership-group .calc-toggle-btn').forEach(btn => {
+            if (btn.dataset.val === comp.ownership) btn.classList.add('calc-selected');
+            btn.onclick = () => CalcApp.updateDet(comp.id, 'ownership', btn.dataset.val);
+        });
+        cardContent.querySelectorAll('.calc-lk-group .calc-toggle-btn').forEach(btn => {
+            if (btn.dataset.val === comp.lk) btn.classList.add('calc-selected');
+            btn.onclick = () => CalcApp.toggleOption(comp.id, 'lk', btn.dataset.val);
+        });
+        cardContent.querySelectorAll('.calc-multi-group .calc-toggle-btn').forEach(btn => {
+            if (btn.dataset.val === comp.multiUser) btn.classList.add('calc-selected');
+            btn.onclick = () => CalcApp.toggleOption(comp.id, 'multiUser', btn.dataset.val);
+        });
+
+        const lkHintBtn = cardContent.querySelector('.calc-months-hint-card-lk');
+        if (lkHintBtn) {
+            lkHintBtn.onclick = () => CalcApp.openMonthsCalc('det', 'lk', comp.id);
+        }
+        const multiHintBtn = cardContent.querySelector('.calc-months-hint-card-multi');
+        if (multiHintBtn) {
+            multiHintBtn.onclick = () => CalcApp.openMonthsCalc('det', 'multi', comp.id);
+        }
+
+        const multiMonthsRow = document.createElement('div');
+        multiMonthsRow.className = 'calc-multi-months-row';
+        multiMonthsRow.style.cssText = `margin-top:10px; display:${(!STATE.isGroup && comp.multiUser !== 'none') ? 'block' : 'none'};`;
+        if (!STATE.isGroup) {
+            multiMonthsRow.innerHTML = `
+                <div style="font-size:10px;color:#999;margin-bottom:4px;font-weight:700;">КОЛИЧЕСТВО МЕСЯЦЕВ ИЛИ ДАТА ДО КОТОРОЙ ПОДКЛЮЧАЕТСЯ УСЛУГА</div>
+                <input type="text" placeholder="12 или дата дд.мм.гггг"
+                    value="${comp.multiMonths === 12 ? '' : comp.multiMonths}"
+                    style="max-width:220px;padding:8px 12px;border:1px solid #e1e8ed;border-radius:10px;font-family:Montserrat,sans-serif;font-size:13px;"
+                    oninput="CalcApp.updateDet(${comp.id}, 'multiMonths', this.value, false)">`;
+        }
+        const cardEl = cardContent.querySelector('.calc-company-card');
+        if (cardEl) cardEl.appendChild(multiMonthsRow);
+        if (idx > 0) {
+            const delBtn = cardContent.querySelector('.calc-remove-card-btn');
+            if (delBtn) { delBtn.style.display = 'block'; delBtn.onclick = () => CalcApp.removeDet(comp.id); }
+        }
+        cardsContainer.appendChild(cardContent);
+    });
+    container.innerHTML = '';
+    container.appendChild(content);
+}
+function renderGlobalAddons() {
+    const container = document.getElementById('calc-global-addons-container');
+    if (!container) return;
+    container.innerHTML = '';
+    const refTariff = STATE.tariffs[0] || {};
+    CONFIG.globalAddons.forEach(addon => {
+        const state = STATE.addons[addon.id];
+        const card = document.createElement('div');
+        card.setAttribute('data-addon-id', addon.id);
+        card.className = `calc-addon-card ${state.enabled ? 'calc-active' : ''}`;
+        let variantsHtml = '', priceSettingsHtml = '';
+        addon.items.forEach(item => {
+            const defaultPrice = parsePriceValue(refTariff[CONFIG.columns[item.col]]);
+            const customPrice = STATE.customPrices[item.col];
+            variantsHtml += `
+                <div class="calc-variant-row">
+                    <span style="flex: 1; padding-right: 10px;">${item.label}</span>
+                    <input type="number" min="0" placeholder="0" value="${state.values[item.id] || ''}"
+                        oninput="CalcApp.updateAddonValue('${addon.id}', '${item.id}', this.value)">
+                </div>`;
+            priceSettingsHtml += `
+                <div class="calc-variant-row" style="border-bottom: 1px dashed #eee; padding: 5px 0;">
+                    <span>${item.label}</span>
+                    <input type="number" min="0" placeholder="${defaultPrice}"
+                        value="${customPrice !== undefined ? customPrice : ''}"
+                        style="width: 70px; background: #fffcf0; border-color: #ffd1a4;"
+                        onkeydown="if(['-', 'e', 'E', ',', '.'].includes(event.key)) event.preventDefault();"
+                        oninput="CalcApp.updateCustomPrice('${item.col}', this.value)">
+                </div>`;
+        });
+        card.innerHTML = `
+            <div class="calc-addon-header">
+                <span class="calc-addon-title">${addon.title}</span>
+                <label class="calc-custom-switch">
+                    <input type="checkbox" ${state.enabled ? 'checked' : ''} onchange="CalcApp.toggleAddon('${addon.id}')">
+                    <span class="calc-slider"></span>
+                </label>
+            </div>
+            <div class="calc-addon-variants">
+                ${variantsHtml}
+                <details style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 10px;">
+                    <summary style="font-size: 11px; color: #FF5D5B; cursor: pointer; font-weight: 600;">Изменить стоимость</summary>
+                    <div style="margin-top: 10px; background: #fafafa; padding: 10px; border-radius: 8px;">${priceSettingsHtml}</div>
+                </details>
+            </div>`;
+        container.appendChild(card);
+    });
+}
+
+function calculate() {
+    let total = 0, discBaseTotal = 0, discCurrentTotal = 0;
+    let hasMonthlyServices = false;
+    const logs = [];
+    const ui = {
+        price: document.getElementById('calc-total-price'),
+        details: document.getElementById('calc-details-content'),
+        discount: document.getElementById('calc-discount-info')
+    };
+    if (!ui.price || !ui.details || !ui.discount) return;
+
+    if (!STATE.isGroup) {
+        ui.discount.style.display = 'none';
+        const t = STATE.tariffMap[STATE.solo.region];
+        if (t) {
+            const isTwo = STATE.solo.duration === '2';
+            const isUL = STATE.solo.ownership === 'ul';
+            const mainPriceKey = isUL ? (isTwo ? 'ul_2year' : 'ul_base') : (isTwo ? 'ip_2year' : 'ip_base');
+            const price = getPrice(t, mainPriceKey);
+            total += price;
+            logs.push(`Лицензия ${isUL ? 'ЮЛ' : 'ИП'}, ${t.Регион}, ${isTwo ? '2 года' : '1 год'} | ${formatPrice(price)}`);
+            CONFIG.extraServices.forEach(srv => {
+                if (STATE.solo[srv.key] === srv.val) {
+                    const colKey = (srv.key === 'lk' && !STATE.solo.lkGroup && srv.colNoGk) ? srv.colNoGk : srv.col;
+                    const srvPriceYear = getPrice(t, colKey);
+                    let srvPrice = srvPriceYear;
+                    let monthsLabel = '';
+                    if (srv.key === 'multiUser') {
+                        const months = STATE.solo.multiMonths || 12;
+                        srvPrice = Math.round(srvPriceYear / 12 * months);
+                        monthsLabel = ` (${months} мес.)`;
+                        hasMonthlyServices = true;
+                    } else if (srv.key === 'lk') {
+                        const months = STATE.solo.lkMonths || 12;
+                        srvPrice = Math.round(srvPriceYear / 12 * months);
+                        monthsLabel = ` (${months} мес.)`;
+                        hasMonthlyServices = true;
+                    }
+                    total += srvPrice;
+                    logs.push(`${hasMonthlyServices ? '+ ' : ''}${srv.label}${monthsLabel} | ${formatPrice(srvPrice)}`);
+                }
+            });
+        }
+    } else {
+        const count = (STATE.mode === 'addon' ? STATE.existingCount : 0) +
+                      (STATE.mode === 'fast' ? STATE.fastRows.reduce((a, b) => a + (parseInt(b.ulCount)||0) + (parseInt(b.ipCount)||0), 0) : STATE.detailedCompanies.length);
+        if (count < 3) {
+            ui.price.textContent = "Мин. 3 орг.";
+            ui.details.innerText = "Нужно минимум 3 организации.";
+            return;
+        }
+        ui.discount.style.display = 'block';
+        const col = getGroupColumnKey(count);
+        if (STATE.mode === 'fast') {
+            STATE.fastRows.forEach(r => {
+                const t = STATE.tariffMap[r.region];
+                if (!t) return;
+                if (r.ulCount > 0) {
+                    const pGK = parsePriceValue(t[col.ul]), pBase = getPrice(t, 'ul_base');
+                    total += pGK * r.ulCount; discCurrentTotal += pGK * r.ulCount; discBaseTotal += pBase * r.ulCount;
+                    logs.push(`ЮЛ (${t.Регион}) | ${formatPrice(pGK)} x ${r.ulCount} | ${formatPrice(pGK * r.ulCount)}`);
+                }
+                if (r.ipCount > 0) {
+                    const pGK = parsePriceValue(t[col.ip]), pBase = getPrice(t, 'ip_base');
+                    total += pGK * r.ipCount; discCurrentTotal += pGK * r.ipCount; discBaseTotal += pBase * r.ipCount;
+                    logs.push(`ИП (${t.Регион}) | ${formatPrice(pGK)} x ${r.ipCount} | ${formatPrice(pGK * r.ipCount)}`);
+                }
+            });
+        } else {
+            STATE.detailedCompanies.forEach(c => {
+                const t = STATE.tariffMap[c.region];
+                if (!t) return;
+                const isUL = c.ownership === 'ul';
+                const pGK = parsePriceValue(t[isUL ? col.ul : col.ip]);
+                const pBase = getPrice(t, isUL ? 'ul_base' : 'ip_base');
+                const compName = c.name || 'Организация';
+                logs.push(`${compName} (${isUL ? 'ЮЛ' : 'ИП'}, ${t.Регион}) | ${formatPrice(pGK)}`);
+                total += pGK; discCurrentTotal += pGK; discBaseTotal += pBase;
+                CONFIG.extraServices.forEach(srv => {
+                    if (c[srv.key] === srv.val) {
+                        const useGroupLk = STATE.isGroup || !!c.lkGroup;
+                        const colKey = (srv.key === 'lk' && !useGroupLk && srv.colNoGk) ? srv.colNoGk : srv.col;
+                        const srvPriceYear = getPrice(t, colKey);
+                        let srvPrice = srvPriceYear;
+                        let monthsLabel = '';
+                        if (srv.key === 'multiUser') {
+                            const months = parseMultiMonths(c.multiMonths);
+                            srvPrice = Math.round(srvPriceYear / 12 * months);
+                            monthsLabel = ` (${months} мес.)`;
+                            hasMonthlyServices = true;
+                        } else if (srv.key === 'lk') {
+                            const months = c.lkMonths || 12;
+                            srvPrice = Math.round(srvPriceYear / 12 * months);
+                            monthsLabel = months !== 12 ? ` (${months} мес.)` : '';
+                            hasMonthlyServices = true;
+                        }
+                        total += srvPrice;
+                        logs.push(`      ${hasMonthlyServices ? '+ ' : ''}${compName} - ${srv.label}${monthsLabel} | ${formatPrice(srvPrice)}`);
+                    }
+                });
+            });
+        }
+        const pct = discBaseTotal > 0 ? Math.round(((discBaseTotal - discCurrentTotal) / discBaseTotal) * 100) : 0;
+        ui.discount.innerHTML = `Скидка ГК: ${pct}% ⓘ`;
+    }
+
+    if (hasMonthlyServices) {
+        // logs.unshift('Помесячные услуги отмечены знаком +.');
+    }
+
+    const refTariff = !STATE.isGroup ? STATE.tariffMap[STATE.solo.region] : STATE.tariffs[0];
+    if (refTariff) {
+        CONFIG.globalAddons.forEach(addon => {
+            const state = STATE.addons[addon.id];
+            if (state && state.enabled) {
+                addon.items.forEach(item => {
+                    const qty = parseInt(state.values[item.id]) || 0;
+                    if (qty > 0) {
+                        const defaultPrice = getPrice(refTariff, item.col);
+                        const price = STATE.customPrices[item.col] !== undefined ? STATE.customPrices[item.col] : defaultPrice;
+                        total += price * qty;
+                        logs.push(`${item.label} | ${formatPrice(price)} x ${qty} | ${formatPrice(price * qty)}`);
+                    }
+                });
+            }
+        });
+    }
+
+    let finalTotal = total;
+    if (STATE.manualDiscount.value > 0) {
+        let discAmount = STATE.manualDiscount.type === 'percent'
+            ? total * (STATE.manualDiscount.value / 100)
+            : STATE.manualDiscount.value;
+        logs.push(`\nДоп. скидка ${STATE.manualDiscount.type === 'percent' ? STATE.manualDiscount.value + '%' : '(руб)'} | -${formatPrice(discAmount)}`);
+        finalTotal = Math.max(0, total - discAmount);
+    }
+
+    ui.price.textContent = formatPrice(finalTotal);
+    ui.details.innerText = logs.join('\n');
+}
+
+function setupDateAutoformat() {
+    function applyDateMask(el) {
+        if (!el || el._dateMasked) return;
+        el._dateMasked = true;
+        el.addEventListener('input', function() {
+            let digits = el.value.replace(/\D/g, '').slice(0, 8);
+            let result = '';
+            if (digits.length <= 2) result = digits;
+            else if (digits.length <= 4) result = digits.slice(0,2) + '.' + digits.slice(2);
+            else result = digits.slice(0,2) + '.' + digits.slice(2,4) + '.' + digits.slice(4);
+            el.value = result;
+        });
+        el.addEventListener('keydown', function(e) {
+            if (e.key === 'Backspace') {
+                const val = el.value;
+                if (val.endsWith('.')) {
+                    e.preventDefault();
+                    el.value = val.slice(0, -2);
+                }
+            }
+        });
+    }
+
+    ['calc-mc-license-end', 'calc-mc-connect-date'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) applyDateMask(el);
+    });
+
+    window._applyDateMask = applyDateMask;
+}
+
+function getGroupColumnKey(n) {
+    if (n <= 5)   return { ul: 'Column5',  ip: 'Column14' };
+    if (n <= 10)  return { ul: 'Column6',  ip: 'Column15' };
+    if (n <= 15)  return { ul: 'Column7',  ip: 'Column16' };
+    if (n <= 25)  return { ul: 'Column8',  ip: 'Column17' };
+    if (n <= 50)  return { ul: 'Column9',  ip: 'Column18' };
+    if (n <= 100) return { ul: 'Column10', ip: 'Column19' };
+    return { ul: 'Column11', ip: 'Column20' };
+}
+
+// PDF
+function initPDF() {
+    const pdfBtn = document.getElementById('calc-generate-pdf');
+    if (!pdfBtn) return;
+    pdfBtn.onclick = async function() {
+        pdfBtn.disabled = true;
+        pdfBtn.textContent = 'Формируем PDF...';
+        try { await buildPDF(); }
+        catch(e) { console.error("Ошибка PDF:", e); alert("Ошибка PDF: " + e.message); }
+        finally { pdfBtn.disabled = false; pdfBtn.textContent = 'Скачать коммерческое предложение'; }
+    };
+}
+
+async function buildPDF() {
+    const jsPDFClass = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+    if (!jsPDFClass) throw new Error('jsPDF не найден');
+    if (typeof html2canvas === 'undefined') throw new Error('html2canvas не найден');
+
+    const PAGE_W  = 794;
+    const PAGE_H  = 1122;
+    const PAD     = 50;
+    const MF      = "font-family:'Montserrat',sans-serif;box-sizing:border-box;";
+    const BOTTOM_PAD = 25;
+    const FOOTER_GAP = 25;
+
+    const totalText    = document.getElementById('calc-total-price')?.innerText || '';
+    const discEl       = document.getElementById('calc-discount-info');
+    const discText     = (discEl && discEl.offsetParent !== null) ? discEl.innerText.replace('ⓘ','').trim() : '';
+    const clientName   = document.getElementById('calc-client-name')?.value.trim() || '';
+    const partnerName  = document.getElementById('calc-partner-name')?.value.trim() || '';
+    const partnerPhone = document.getElementById('calc-partner-phone')?.value.trim() || '';
+    const partnerEmail = document.getElementById('calc-partner-email')?.value.trim() || '';
+    const lines        = (document.getElementById('calc-details-content')?.innerText || '')
+        .split('\n').map(s => s.trim()).filter(Boolean);
+
+    const assets = document.getElementById('calc-assets');
+    if (!assets) throw new Error('Элемент #calc-assets не найден в DOM');
+
+    const headerSrc = assets.dataset.headerSrc || '';
+    const footerSrcs = [];
+    for (let i = 1; i <= 6; i++) {
+        const src = assets.getAttribute(`data-footer-src-${i}`);
+        if (src) footerSrcs.push(src);
+    }
+
+    const waitImg = img => new Promise(res => {
+        if (!img.src) { res(); return; }
+        if (img.complete && img.naturalHeight > 0) { res(); return; }
+        img.onload = img.onerror = res;
+    });
+    const mount = el => {
+        el.style.position = 'absolute';
+        el.style.top = '0';
+        el.style.left = '-9999px';
+        el.style.zIndex = '-1';
+        document.body.appendChild(el);
+    };
+    const unmount = el => { if (el && el.parentNode) el.parentNode.removeChild(el); };
+    const toCanvas = el => html2canvas(el, {
+        scale: 5, useCORS: true, allowTaint: true, logging: false,
+        width: PAGE_W, windowWidth: PAGE_W
+    });
+    const measureHeight = html => {
+        const div = document.createElement('div');
+        div.style.cssText = `width:${PAGE_W}px;position:absolute;top:0;left:-9999px;visibility:hidden;`;
+        div.innerHTML = html;
+        document.body.appendChild(div);
+        const h = div.getBoundingClientRect().height;
+        document.body.removeChild(div);
+        return h;
+    };
+
+    const rowHTML = line => {
+        if (!line.includes('|'))
+            return `<tr><td colspan="2" style="padding:3px 0;font-size:9pt;color:#999;${MF}">${line}</td></tr>`;
+        const parts = line.split('|');
+        const lbl   = parts.length > 2 ? parts[0].trim() + ' | ' + parts[1].trim() : parts[0].trim();
+        const pr    = parts[parts.length-1].trim();
+        return `<tr>
+            <td style="padding:5px 0;border-bottom:1px solid #eee;font-size:9.5pt;${MF}">${lbl}</td>
+            <td style="padding:5px 0;border-bottom:1px solid #eee;text-align:right;font-weight:700;color:#FF5D5B;font-size:9.5pt;white-space:nowrap;${MF}">${pr}</td>
+        </tr>`;
+    };
+
+    const summaryHTML = () => {
+        const lbl  = clientName ? `Стоимость для ${clientName}:` : 'Итоговая стоимость:';
+        const disc = discText ? `<div style="color:#27ae60;font-weight:700;font-size:11px;margin-top:4px;">${discText}</div>` : '';
+        return `<div style="background:#ffdbdb;padding:16px 20px;border-radius:12px;text-align:center;margin-top:18px;${MF}">
+            <div style="font-size:13px;color:#333;margin-bottom:4px;">${lbl}</div>
+            <div style="font-size:28px;font-weight:800;color:#FF5D5B;">${totalText}</div>
+            ${disc}
+        </div>`;
+    };
+
+    const contactHTML = () => {
+        const nm = partnerName  ? `<div style="font-weight:600;color:#555;font-size:12px;margin-bottom:2px;">${partnerName}</div>` : '';
+        const ph = partnerPhone ? `<div style="font-weight:600;font-size:12px;color:#555;margin-bottom:1px;">${partnerPhone}</div>` : '';
+        const em = partnerEmail ? `<div style="font-size:11px;color:#555;font-weight:600;">${partnerEmail}</div>` : '';
+        if (!nm && !ph && !em) return '';
+        return `<div style="margin-top:14px;padding:14px 20px;border:1px solid #ddd;border-radius:14px;display:flex;justify-content:space-between;align-items:center;${MF}">
+            <div>
+                <div style="color:#FF5D5B;font-weight:800;font-size:14px;margin-bottom:2px;">Как подключиться</div>
+                <div style="color:#999;font-size:10px;">Свяжитесь с нами, чтобы подключить сервис</div>
+            </div>
+            <div style="text-align:right;">${nm}${ph}${em}</div>
+        </div>`;
+    };
+
+    const makeFooterImgsHTML = (from, count) => {
+        const contentWidth = PAGE_W - PAD * 2;
+        const FOOTER_SCALE = 1.5;
+        const items = footerSrcs.slice(from, from + count)
+            .map((src, idx) => {
+                const nat = footerNaturalSizes[from + idx];
+                const imgW = nat && nat.w
+                    ? Math.min(Math.round(nat.w / FOOTER_SCALE), contentWidth)
+                    : contentWidth;
+                const isLast = (idx === count - 1);
+                return `<div style="margin-bottom:${isLast ? 0 : FOOTER_GAP}px;">
+                    <img src="${src}" crossorigin="anonymous" style="display:block;width:${imgW}px;height:auto;">
+                </div>`;
+            }).join('');
+        return `<div style="padding:0 ${PAD}px;box-sizing:border-box;">${items}</div>`;
+    };
+
+    // Header
+    const divHeader = document.createElement('div');
+    divHeader.style.cssText = `width:${PAGE_W}px;background:#fff;`;
+    if (headerSrc) {
+        const img = document.createElement('img');
+        img.src = headerSrc;
+        img.style.cssText = `width:${PAGE_W}px;display:block;`;
+        divHeader.appendChild(img);
+    }
+    mount(divHeader);
+    await Promise.all(Array.from(divHeader.querySelectorAll('img')).map(waitImg));
+    await new Promise(r => setTimeout(r, 100));
+    const canvasHeader = await toCanvas(divHeader);
+    unmount(divHeader);
+    const headerH_px = Math.round(PAGE_W * canvasHeader.height / canvasHeader.width);
+
+    // ─── Предзагрузка футеров ─────────────────────────────────────────────
+    const contentWidth = PAGE_W - PAD * 2;
+    const FOOTER_SCALE = 1.5;
+    const footerNaturalSizes = await Promise.all(footerSrcs.map(src => new Promise(res => {
+        const img = new Image();
+        img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight });
+        img.onerror = () => res({ w: 0, h: 0 });
+        img.src = src;
+    })));
+    const footerDisplayHeights = footerNaturalSizes.map(({ w, h }) => {
+        if (!w) return 0;
+        const dw = Math.min(Math.round(w / FOOTER_SCALE), contentWidth);
+        return Math.round(h * dw / w);
+    });
+
+    // ─── Измеряем блоки ───────────────────────────────────────────────────
+    const titleHTML = `<div style="padding:20px ${PAD}px 0;${MF}">
+        <h2 style="color:#FF5D5B;font-size:15px;margin:0 0 10px 0;font-weight:800;">Стоимость подключения:</h2>
+    </div>`;
+    const titleH = measureHeight(titleHTML);
+
+    const rowHeights = lines.map(line => measureHeight(
+        `<div style="width:${PAGE_W}px;padding:0 ${PAD}px;box-sizing:border-box;${MF}">
+            <table style="width:100%;border-collapse:collapse;"><tbody>${rowHTML(line)}</tbody></table>
+        </div>`
+    ));
+
+    // Измеряем итог и контакты по отдельности
+    const summaryOnlyHTML = `<div style="padding:0 ${PAD}px 10px;${MF}">${summaryHTML()}</div>`;
+    const contactOnlyHTML = contactHTML()
+        ? `<div style="padding:0 ${PAD}px 10px;${MF}">${contactHTML()}</div>`
+        : '';
+    const summaryBlockHTML = `<div style="padding:0 ${PAD}px 10px;${MF}">${summaryHTML()}${contactHTML()}</div>`;
+
+    const summaryOnlyH  = measureHeight(summaryOnlyHTML);
+    const contactOnlyH  = contactOnlyHTML ? measureHeight(contactOnlyHTML) : 0;
+    const summaryBlockH = summaryOnlyH + contactOnlyH;
+
+    const availableP1   = PAGE_H - headerH_px - 30;
+    const availableRest = PAGE_H - 30;
+
+    // ─── Разбиваем строки по страницам ────────────────────────────────────
+    // summaryOnThisPage: false | 'full' | 'summary-only' | 'contact-only'
+    const pages = [];
+    let remaining = [...lines];
+    let isFirstPage = true;
+
+    while (remaining.length > 0 || pages.length === 0) {
+        const available = isFirstPage ? availableP1 : availableRest;
+        const overhead  = isFirstPage ? titleH : 30;
+        let used = overhead;
+        const pageLines = [];
+
+        for (let i = 0; i < remaining.length; i++) {
+            if (used + rowHeights[lines.length - remaining.length + i] <= available) {
+                used += rowHeights[lines.length - remaining.length + i];
+                pageLines.push(remaining[i]);
+            } else {
+                break;
+            }
+        }
+
+        // защита от бесконечного цикла
+        if (pageLines.length === 0 && remaining.length > 0) {
+            pageLines.push(remaining[0]);
+            used += rowHeights[lines.length - remaining.length];
+        }
+
+        remaining = remaining.slice(pageLines.length);
+        const isLast = remaining.length === 0;
+
+        // На последней странице со строками — проверяем что влезает
+        let summaryOnThisPage = false;
+        if (isLast) {
+            if (used + summaryBlockH <= available) {
+                // Влезает всё целиком
+                summaryOnThisPage = 'full';
+            } else if (used + summaryOnlyH <= available) {
+                // Влезает только итог, контакты уйдут отдельно
+                summaryOnThisPage = 'summary-only';
+            }
+            // Иначе false — ничего не влезло, всё на следующую страницу
+        }
+
+        const addedH = summaryOnThisPage === 'full' ? summaryBlockH
+                     : summaryOnThisPage === 'summary-only' ? summaryOnlyH
+                     : 0;
+
+        pages.push({ lines: pageLines, isFirst: isFirstPage, isLast, summaryOnThisPage, usedH: used + addedH });
+        isFirstPage = false;
+
+        if (isLast) break;
+    }
+
+    // Добавляем страницы для итого/контактов если не влезли
+    const lastPage = pages[pages.length - 1];
+
+    if (!lastPage.summaryOnThisPage) {
+        // Ничего не влезло — проверяем влезут ли вместе на новой странице
+        if (summaryBlockH + 30 <= availableRest) {
+            pages.push({ lines: [], isFirst: false, isLast: true, summaryOnThisPage: 'full', usedH: summaryBlockH + 30 });
+        } else {
+            // Не влезают даже вместе — итог отдельно, контакты отдельно
+            pages.push({ lines: [], isFirst: false, isLast: false, summaryOnThisPage: 'summary-only', usedH: summaryOnlyH + 30 });
+            if (contactOnlyHTML) {
+                pages.push({ lines: [], isFirst: false, isLast: true, summaryOnThisPage: 'contact-only', usedH: contactOnlyH + 30 });
+            }
+        }
+    } else if (lastPage.summaryOnThisPage === 'summary-only' && contactOnlyHTML) {
+        // Итог влез, контакты не влезли — добавляем страницу для контактов
+        pages.push({ lines: [], isFirst: false, isLast: true, summaryOnThisPage: 'contact-only', usedH: contactOnlyH + 30 });
+    }
+
+    // ─── Считаем футер ─────────────────────────────────────────────────────
+    const finalPage = pages[pages.length - 1];
+    const availableForFooter = (finalPage.isFirst ? availableP1 : availableRest) - finalPage.usedH - BOTTOM_PAD;
+
+    let footerOnLastPage = 0, accumulated = 0;
+    for (let i = 0; i < footerDisplayHeights.length; i++) {
+        if (!footerDisplayHeights[i]) continue;
+        const gap = footerOnLastPage > 0 ? FOOTER_GAP : 0;
+        if (accumulated + gap + footerDisplayHeights[i] <= availableForFooter) {
+            accumulated += gap + footerDisplayHeights[i];
+            footerOnLastPage = i + 1;
+        } else break;
+    }
+    const footerOnExtraPage = footerSrcs.length - footerOnLastPage;
+
+    // ─── Рендерим каждую страницу ──────────────────────────────────────────
+    const canvases = [];
+
+    for (let pi = 0; pi < pages.length; pi++) {
+        const pg = pages[pi];
+        const isLastPage = pi === pages.length - 1;
+        const div = document.createElement('div');
+        div.style.cssText = `width:${PAGE_W}px;background:#fff;`;
+
+        const tableRows = pg.lines.map(rowHTML).join('');
+        const tableHTML = tableRows ? `
+            <div style="padding:${pg.isFirst ? '20px' : '30px'} ${PAD}px 0;${MF}">
+                ${pg.isFirst ? `<h2 style="color:#FF5D5B;font-size:15px;margin:0 0 10px 0;font-weight:800;">Стоимость подключения:</h2>` : ''}
+                <table style="width:100%;border-collapse:collapse;">
+                    <tbody>${tableRows}</tbody>
+                </table>
+            </div>` : '';
+
+        const summaryRendered =
+            pg.summaryOnThisPage === 'full'         ? summaryBlockHTML :
+            pg.summaryOnThisPage === 'summary-only' ? summaryOnlyHTML  :
+            pg.summaryOnThisPage === 'contact-only' ? contactOnlyHTML  : '';
+
+        const footerHTML = isLastPage && footerOnLastPage > 0
+            ? `<div style="margin-top:${BOTTOM_PAD}px;">${makeFooterImgsHTML(0, footerOnLastPage)}</div>`
+            : '';
+
+        div.innerHTML = tableHTML + summaryRendered + footerHTML;
+
+        mount(div);
+        await Promise.all(Array.from(div.querySelectorAll('img')).map(waitImg));
+        await new Promise(r => setTimeout(r, 150));
+        canvases.push(await toCanvas(div));
+        unmount(div);
+    }
+
+    // Доп. страница с оставшимся футером
+    let canvasExtraFooter = null;
+    if (footerOnExtraPage > 0) {
+        const divF = document.createElement('div');
+        divF.style.cssText = `width:${PAGE_W}px;background:#fff;padding-top:40px;box-sizing:border-box;`;
+        divF.innerHTML = makeFooterImgsHTML(footerOnLastPage, footerOnExtraPage);
+        mount(divF);
+        await Promise.all(Array.from(divF.querySelectorAll('img')).map(waitImg));
+        await new Promise(r => setTimeout(r, 150));
+        canvasExtraFooter = await toCanvas(divF);
+        unmount(divF);
+    }
+
+    // ─── Сборка PDF ────────────────────────────────────────────────────────
+    const pdf = new jsPDFClass({ unit:'pt', format:'a4', orientation:'portrait' });
+    const PW  = pdf.internal.pageSize.getWidth();
+
+    const headerH_pt = PW * (canvasHeader.height / canvasHeader.width);
+    pdf.addImage(canvasHeader.toDataURL('image/jpeg', 1.0), 'JPEG', 0, 0, PW, headerH_pt);
+    pdf.addImage(canvases[0].toDataURL('image/jpeg', 1.0), 'JPEG', 0, headerH_pt, PW,
+        PW * (canvases[0].height / canvases[0].width));
+
+    for (let i = 1; i < canvases.length; i++) {
+        pdf.addPage();
+        pdf.addImage(canvases[i].toDataURL('image/jpeg', 1.0), 'JPEG', 0, 0, PW,
+            PW * (canvases[i].height / canvases[i].width));
+    }
+
+    if (canvasExtraFooter) {
+        pdf.addPage();
+        pdf.addImage(canvasExtraFooter.toDataURL('image/jpeg', 1.0), 'JPEG', 0, 0, PW,
+            PW * (canvasExtraFooter.height / canvasExtraFooter.width));
+    }
+
+    const safe = clientName.replace(/[^а-яёА-ЯЁa-zA-Z0-9 _-]/g, '').trim();
+    pdf.save(safe ? `КП_1С_Отчетность_${safe}.pdf` : 'КП_1С_Отчетность.pdf');
+}
+// ─── ПУБЛИЧНЫЙ API ────────────────────────────────────────────────────────
+
+const CalcApp = {
+    updateSolo: (f, v) => {
+        if (f === 'employees') { STATE.solo.employees = v === "" ? "" : Math.max(0, parseInt(v) || 0); render(); }
+        else { STATE.solo[f] = v; render(); }
+    },
+    addFastRow: () => { STATE.fastRows.push({ id: Date.now(), region: '', ulCount: 1, ipCount: 0 }); render(); },
+    updateFast: (id, f, v) => {
+        const r = STATE.fastRows.find(x => x.id == id);
+        if (r) r[f] = f.includes('Count') ? (parseInt(v) || 0) : v;
+        calculate();
+    },
+    removeFast: (id) => {
+        if (STATE.fastRows.length > 1) { STATE.fastRows = STATE.fastRows.filter(x => x.id != id); render(); }
+    },
+    addDetailedCompany: () => {
+        STATE.detailedCompanies.push({ id: Date.now(), name: '', inn: '', region: '', ownership: 'ul', lk: 'none', multiUser: 'none', multiMonths: 12, lkMonths: 12, lkGroup: STATE.isGroup });
+        render();
+    },
+    updateDet: (id, f, v, redraw = true) => {
+        const c = STATE.detailedCompanies.find(x => x.id == id);
+        if (c) { if (f === 'name') v = v.replace(/"([^"]*)"/g, '«$1»').replace(/"/g, '»'); c[f] = v; }
+        if (redraw) render(); else calculate();
+    },
+    removeDet: (id) => {
+        if (STATE.detailedCompanies.length > 1) { STATE.detailedCompanies = STATE.detailedCompanies.filter(x => x.id != id); render(); }
+    },
+    toggleOption: (id, field, value) => {
+        const c = STATE.detailedCompanies.find(x => x.id == id);
+        if (!c) return;
+        c[field] = c[field] === value ? 'none' : value;
+        if (field === 'lk' && c[field] !== 'none' && STATE.isGroup) c.lkGroup = true;
+        if (field === 'lk' && c[field] !== 'none') c.multiUser = 'none';
+        if (field === 'multiUser' && c[field] !== 'none') c.lk = 'none';
+        render();
+    },
+    toggleAddon: (id) => {
+        STATE.addons[id].enabled = !STATE.addons[id].enabled;
+        const card = document.querySelector(`[data-addon-id="${id}"]`);
+        if (card) {
+            card.classList.toggle('calc-active', STATE.addons[id].enabled);
+            const cb = card.querySelector('input[type="checkbox"]');
+            if (cb) cb.checked = STATE.addons[id].enabled;
+        }
+        calculate();
+    },
+    updateAddonValue: (aId, iId, val) => { STATE.addons[aId].values[iId] = parseInt(val) || 0; calculate(); },
+    updateCustomPrice: (col, val) => {
+        if (val === "") { delete STATE.customPrices[col]; }
+        else { STATE.customPrices[col] = parseInt(val.toString().replace(/\D/g, '')) || 0; }
+        localStorage.setItem('my_custom_prices', JSON.stringify(STATE.customPrices));
+        calculate();
+    },
+    updateSoloEmployees: () => {
+        // устарело, оставлено для совместимости
+    },
+    toggleSoloOption: (field, value) => {
+        STATE.solo[field] = STATE.solo[field] === value ? 'none' : value;
+        if (field === 'lk' && STATE.solo[field] !== 'none') STATE.solo.multiUser = 'none';
+        if (field === 'multiUser' && STATE.solo[field] !== 'none') STATE.solo.lk = 'none';
+        render();
+    },
+    _mc: { context: null, field: null, compId: null, months: null, price: null, variant: null, variantLabel: null },
+
+    openMonthsCalc(context, field, compId) {
+        CalcApp._mc = { context, field, compId: compId || null, months: null, price: null, variant: null, variantLabel: null, lkGroup: false };
+
+        if (field === 'lk') {
+            if (context === 'solo') CalcApp._mc.lkGroup = !!STATE.solo.lkGroup;
+            else if (context === 'det' && compId) {
+                const comp = STATE.detailedCompanies.find(x => x.id == compId);
+                if (comp) CalcApp._mc.lkGroup = !!comp.lkGroup;
+            }
+            if (STATE.isGroup) CalcApp._mc.lkGroup = true;
+        }
+
+        const modal = document.getElementById('calc-months-modal');
+        if (!modal) return;
+
+        const getVariants = () => field === 'lk'
+            ? [ { val: 'base', col: CalcApp._mc.lkGroup ? 'lk_base' : 'lk_base_nogk', label: 'ЛК Базовый' },
+                { val: 'prof', col: CalcApp._mc.lkGroup ? 'lk_prof' : 'lk_prof_nogk', label: 'ЛК Проф' } ]
+            : [ { val: 'small', col: 'multi_small', label: '�� 2�9' }, { val: 'large', col: 'multi_large', label: '�� 10+' } ];
+
+        const applyVariants = () => {
+            const variants = getVariants();
+            CalcApp._mc._variants = variants;
+            const cur = CalcApp._mc.variant;
+            const found = variants.find(v => v.val === cur);
+            CalcApp._mc.variant = found ? found.val : variants[0].val;
+            CalcApp._mc.variantLabel = found ? found.label : variants[0].label;
+            CalcApp._mc._variantCol = found ? found.col : variants[0].col;
+
+            const group = document.getElementById('calc-mc-variant-group');
+            if (group) {
+                group.innerHTML = '';
+                variants.forEach((v) => {
+                    const btn = document.createElement('button');
+                    btn.textContent = v.label;
+                    btn.style.cssText = 'flex:1;border:2px solid transparent;padding:9px 10px;border-radius:10px;cursor:pointer;font-weight:600;font-family:Montserrat,sans-serif;font-size:13px;transition:all 0.2s;';
+                    if (v.val === CalcApp._mc.variant) {
+                        btn.style.background = '#FF5D5B'; btn.style.color = '#fff'; btn.style.borderColor = '#fff';
+                    } else {
+                        btn.style.background = 'transparent'; btn.style.color = '#7f8c8d';
+                    }
+                    btn.onclick = () => {
+                        CalcApp._mc.variant = v.val;
+                        CalcApp._mc.variantLabel = v.label;
+                        CalcApp._mc._variantCol = v.col;
+                        group.querySelectorAll('button').forEach(b => {
+                            b.style.background = 'transparent'; b.style.color = '#7f8c8d'; b.style.borderColor = 'transparent';
+                        });
+                        btn.style.background = '#FF5D5B'; btn.style.color = '#fff'; btn.style.borderColor = '#fff';
+                        if (CalcApp._mc.months !== null) CalcApp._updateMcPrice();
+                    };
+                    group.appendChild(btn);
+                });
+            }
+        };
+
+        const subtitleEl = document.getElementById('calc-mc-subtitle');
+        if (subtitleEl) subtitleEl.textContent = field === 'lk' ? 'Личный кабинет' : 'Многопользовательский режим';
+
+        const gkRow = document.getElementById('calc-mc-gk-row');
+        if (gkRow) {
+            if (field === 'lk') {
+                gkRow.style.display = 'block';
+                const gkBtns = gkRow.querySelectorAll('.calc-mc-gk-btn');
+                gkBtns.forEach(b => {
+                    b.style.background = 'transparent'; b.style.color = '#7f8c8d'; b.style.borderColor = 'transparent';
+                    if ((b.dataset.val === 'yes') === CalcApp._mc.lkGroup) {
+                        b.style.background = '#FF5D5B'; b.style.color = '#fff'; b.style.borderColor = '#fff';
+                    }
+                    b.onclick = () => {
+                        if (STATE.isGroup) return;
+                        CalcApp._mc.lkGroup = b.dataset.val === 'yes';
+                        const vars = getVariants();
+                        CalcApp._mc._variants = vars;
+                        const cv = vars.find(v => v.val === CalcApp._mc.variant) || vars[0];
+                        CalcApp._mc.variant = cv.val; CalcApp._mc.variantLabel = cv.label; CalcApp._mc._variantCol = cv.col;
+                        gkBtns.forEach(x => { x.style.background='transparent'; x.style.color='#7f8c8d'; x.style.borderColor='transparent'; });
+                        b.style.background = '#FF5D5B'; b.style.color = '#fff'; b.style.borderColor = '#fff';
+                        applyVariants();
+                        if (CalcApp._mc.months !== null) CalcApp._updateMcPrice();
+                    };
+                });
+            } else {
+                gkRow.style.display = 'none';
+            }
+        }
+
+        applyVariants();
+
+        document.getElementById('calc-mc-license-end').value = '';
+        document.getElementById('calc-mc-connect-date').value = '';
+        document.getElementById('calc-mc-result').style.display = 'none';
+        document.getElementById('calc-mc-apply-btn').style.display = 'none';
+        modal.style.display = 'flex';
+    },
+
+    closeMonthsCalc() {
+        const modal = document.getElementById('calc-months-modal');
+        if (modal) modal.style.display = 'none';
+    },
+
+    _updateMcPrice() {
+        const mc = CalcApp._mc;
+        let tariff = null;
+        if (mc.context === 'solo') {
+            tariff = STATE.tariffMap[STATE.solo.region] || STATE.tariffs[0];
+        } else if (mc.context === 'det' && mc.compId) {
+            const comp = STATE.detailedCompanies.find(x => x.id == mc.compId);
+            tariff = (comp && STATE.tariffMap[comp.region]) || STATE.tariffs[0];
+        }
+        tariff = tariff || STATE.tariffs[0];
+        const colKey = mc._variantCol;
+        const yearPrice = tariff ? (parseInt(tariff[CONFIG.columns[colKey]]) || 0) : 0;
+        const months = mc.months;
+        const chargeMonths = months === null ? null : Math.max(1, months);
+        const price = yearPrice > 0 && chargeMonths !== null ? Math.round(yearPrice / 12 * chargeMonths) : null;
+        mc.price = price;
+
+        const priceEl = document.getElementById('calc-mc-price-val');
+        const formulaEl = document.getElementById('calc-mc-price-formula');
+        if (priceEl) {
+            if (price !== null && yearPrice > 0) {
+                priceEl.textContent = Math.round(price).toLocaleString('ru-RU') + ' ₽';
+                if (formulaEl) formulaEl.textContent = `${yearPrice.toLocaleString('ru-RU')} / 12 × ${chargeMonths}`;
+            } else if (yearPrice === 0) {
+                priceEl.textContent = '�';
+                if (formulaEl) formulaEl.textContent = tariff ? 'нет цены для региона' : 'регион не выбран';
+            }
+        }
+        const applyBtn = document.getElementById('calc-mc-apply-btn');
+        if (applyBtn) applyBtn.style.display = (months !== null ? 'block' : 'none');
+    },
+
+    calcMonths() {
+        const parseDate = (s) => {
+            s = (s || '').trim();
+            const m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+            if (!m) return null;
+            const d = new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]));
+            if (d.getFullYear() !== parseInt(m[3]) || d.getMonth() !== parseInt(m[2])-1 || d.getDate() !== parseInt(m[1])) return null;
+            return d;
+        };
+
+        const addMonths = (date, n) => {
+            const y = date.getFullYear(), mo = date.getMonth(), d = date.getDate();
+            const targetMo = mo + n;
+            const targetYear = y + Math.floor(targetMo / 12);
+            const targetMonth = ((targetMo % 12) + 12) % 12;
+            const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+            return new Date(targetYear, targetMonth, Math.min(d, lastDay));
+        };
+        const prevDay = d => new Date(d.getTime() - 86400000);
+
+        const fullMonths = (start, end) => {
+            if (end < start) return 0;
+            let n = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()) + 1;
+            while (n > 0 && prevDay(addMonths(start, n)) > end) n--;
+            return Math.max(0, n);
+        };
+
+        const endStr = document.getElementById('calc-mc-license-end').value;
+        const connectStr = document.getElementById('calc-mc-connect-date').value;
+        const licEnd = parseDate(endStr);
+        const connectDate = parseDate(connectStr);
+        const resultBox = document.getElementById('calc-mc-result');
+        const monthsVal = document.getElementById('calc-mc-months-val');
+        const explainEl = document.getElementById('calc-mc-explain');
+        const applyBtn = document.getElementById('calc-mc-apply-btn');
+
+        if (!licEnd || !connectDate) {
+            resultBox.style.display = 'block';
+            monthsVal.textContent = '�';
+            document.getElementById('calc-mc-price-val').textContent = '';
+            document.getElementById('calc-mc-price-formula').textContent = '';
+            explainEl.textContent = 'Проверьте формат дат (дд.мм.гггг)';
+            applyBtn.style.display = 'none';
+            CalcApp._mc.months = null;
+            return;
+        }
+        if (connectDate > licEnd) {
+            resultBox.style.display = 'block';
+            monthsVal.textContent = '0 мес. (к оплате 1 мес.)';
+            explainEl.textContent = 'Дата подключения позже окончания лицензии';
+            CalcApp._mc._endStr = endStr;
+            CalcApp._mc._connectStr = connectStr;
+            CalcApp._mc.months = 0;
+            CalcApp._updateMcPrice();
+            return;
+        }
+
+        const months = fullMonths(connectDate, licEnd);
+        CalcApp._mc.months = months;
+        CalcApp._mc._endStr = endStr;
+        CalcApp._mc._connectStr = connectStr;
+
+        const endOfStart = addMonths(connectDate, months);
+        monthsVal.textContent = months + ' мес.';
+        explainEl.textContent = `${connectStr} + ${months} мес. = ${endOfStart.getDate().toString().padStart(2,'0')}.${(endOfStart.getMonth()+1).toString().padStart(2,'0')}.${endOfStart.getFullYear()}`;
+        resultBox.style.display = 'block';
+
+        CalcApp._updateMcPrice();
+    },
+
+    applyMonths() {
+        const { context, field, compId, months } = CalcApp._mc;
+        if (months === null || months === undefined) return;
+        const appliedMonths = Math.max(1, months);
+
+        if (context === 'solo') {
+            if (field === 'lk') {
+                const lkVal = CalcApp._mc.variant;
+                STATE.solo.lk = lkVal;
+                STATE.solo.lkMonths = appliedMonths;
+                STATE.solo.lkGroup = !!CalcApp._mc.lkGroup;
+            }
+            if (field === 'multi') {
+                STATE.solo.multiUser = CalcApp._mc.variant;
+                STATE.solo.multiMonths = appliedMonths;
+            }
+            render();
+        } else if (context === 'det' && compId) {
+            const comp = STATE.detailedCompanies.find(x => x.id == compId);
+            if (comp) {
+                if (field === 'lk') { comp.lk = CalcApp._mc.variant; comp.lkMonths = appliedMonths; comp.lkGroup = !!CalcApp._mc.lkGroup; }
+                if (field === 'multi') { comp.multiUser = CalcApp._mc.variant; comp.multiMonths = appliedMonths; }
+                render();
+            }
+        }
+        CalcApp.closeMonthsCalc();
+    }
+};
+window.CalcApp = CalcApp;
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { init(); initPDF(); });
+} else {
+    init();
+    initPDF();
+}
+
+})();
+
+
+(function() {
+'use strict';
+
+/**
+ * 1. КОНФИГУРАЦИЯ И КОНСТАНТЫ
+ */
+const CONSTANTS = {
+    KEYS: {
+        tariffs: [
+            "1С-ЭПД 600 документов", "1С-ЭПД 1 000 документов", 
+            "1С-ЭПД 5 000 документов", "1С-ЭПД \n10 000 документов", 
+            "1С-ЭПД \n50 000 документов\n", "1С-ЭПД \n100 000 документов\n"
+        ],
+        project: "1С-ЭПД Проектное решение",
+        ukep12: "УКЭП Базис  12 месяцев", 
+        ukep15: "УКЭП Базис  15 месяцев",
+        kcr: "КЦР ", 
+        kepEgais: "КЭП ЕГАИС",
+        kepUniv: "КЭП Универсальный",
+        kepBasis: "КЭП Базис",
+        mchd: {
+            base: "МЧД Базовый на 1 год(5 мчд)",
+            ext: "МЧД Расширенный на 1 год",
+            single: "Одна МЧД",
+            extra: "Дополнительные МЧД ",
+            start: "Старт работы с МЧД в сервисе Астрал Доверенность"
+        },
+        services: {
+            setup_win_1: "OC Windows nalog.ru или ЕСИА",
+            setup_win_2: "OC Windows nalog.ru и ЕСИА",
+            setup_mac_1: "OC MacOS nalog.ru или ЕСИА",
+            setup_mac_2: "OC MacOS nalog.ru и ЕСИА",
+            typical_setup: "Типовая установка",
+            project_setup: "Проектная установка",
+            training: "Обучение пользователей по работе с Пр",
+            goslog_win: "Регистрация на платформе «ГосЛог» OC Windows",
+            goslog_mac: "Регистрация на платформе «ГосЛог» OC MacOS",
+            project_survey: "Проектное обследование",
+            epd_start_tr_first: "Старт работы с ЭПД на 1-м рабочем месте (ТР)",
+            epd_start_tr_next: "Старт работы с ЭПД на 2-м и последующих рабочих местах (ТР)",
+            epd_start_pr_first: "Старт работы с ЭПД на 1-м рабочем месте (ПР)",
+            epd_start_pr_next: "Старт работы с ЭПД  на 2-м и последующих рабочих местах (ПР)",
+            epd_training_tr: "Обучение и консультация по запуску работы в 1С-ЭПД (ТР)",
+            epd_training_pr: "Обучение и консультация по запуску работы в 1С-ЭПД (ПР)",
+            epd_transition_survey: "Предпроектное обследование по переходу на ЭПД",
+            epd_goslog_support: "Настройка рабочего места и техническая поддержка по регистрации на платформе ГосЛог (для экспедиторов)",
+            epd_config_update: "Доработка конфигурации 1С для работы с ЭПД",
+            install_local: "Установка 1С на локальный компьютер",
+            install_server: "Установка 1С на сервер",
+            install_thin: "Установка 1С на тонкий клиент 1С на локальный компьютер",
+            update_configs: "Обновление типовых конфигураций",
+            migrate_fresh: "Перенос базы 1С из локальной 1С во Фреш",
+            migrate_pc: "Перенос базы 1С на другой компьютер",
+            install_thin_client: "Установка тонкого клиента"
+        }
+    },
+    LIMITS: [600, 1000, 5000, 10000, 50000, 100000],
+
+    ADDONS: [
+        {
+            id: 'setup', title: 'Удалённая настройка рабочего места',
+            items: [
+                { id: 'sw1', label: 'Windows (nalog.ru <b>или</b> ЕСИА)', keyRef: 'setup_win_1' },
+                { id: 'sw2', label: 'Windows (nalog.ru <b>и</b> ЕСИА)', keyRef: 'setup_win_2' },
+                { id: 'sm1', label: 'MacOS (nalog.ru <b>или</b> ЕСИА)', keyRef: 'setup_mac_1' },
+                { id: 'sm2', label: 'MacOS (nalog.ru <b>и</b> ЕСИА)', keyRef: 'setup_mac_2' }
+            ]
+        },
+        {
+            id: 'goslog', title: 'Регистрация на платформе «ГосЛог»',
+            items: [
+                { id: 'gw1', label: 'Регистрация на платформе «ГосЛог» для OC Windows', keyRef: 'goslog_win' },
+                { id: 'gm1', label: 'Регистрация на платформе «ГосЛог» для OC MacOS', keyRef: 'goslog_mac' },
+                { id: 'epd_goslog_support', label: 'Настройка рабочего места и техническая поддержка по регистрации на платформе ГосЛог (для экспедиторов)', keyRef: 'epd_goslog_support' }
+            ]
+        },
+        {
+            id: 'service', title: 'Внедрение и обучение',
+            items: [
+                { id: 'setup_typical', label: 'Типовая настройка', keyRef: 'typical_setup', modes: ['typical'] },
+                { id: 'setup_project',  label: 'Проектная установка', keyRef: 'project_setup', modes: ['project'] },
+                { id: 't1', label: 'Обучение (1 группа до 5 человек/час)', keyRef: 'training' },
+                { id: 'ps1', label: 'Проектное обследование (1 час)', keyRef: 'project_survey' }
+            ]
+        },
+        {
+            id: 'epd_launch', title: 'Старт и сопровождение 1С-ЭПД',
+            items: [
+                { id: 'epd_start_tr_first', label: 'Старт работы с ЭПД на 1-м рабочем месте (ТР)', keyRef: 'epd_start_tr_first', modes: ['typical'] },
+                { id: 'epd_start_tr_next', label: 'Старт работы с ЭПД на 2-м и последующих рабочих местах (ТР)', keyRef: 'epd_start_tr_next', modes: ['typical'] },
+                { id: 'epd_start_pr_first', label: 'Старт работы с ЭПД на 1-м рабочем месте (ПР)', keyRef: 'epd_start_pr_first', modes: ['project'] },
+                { id: 'epd_start_pr_next', label: 'Старт работы с ЭПД на 2-м и последующих рабочих местах (ПР)', keyRef: 'epd_start_pr_next', modes: ['project'] },
+                { id: 'epd_training_tr', label: 'Обучение и консультация по запуску работы в 1С-ЭПД (ТР)', keyRef: 'epd_training_tr', modes: ['typical'] },
+                { id: 'epd_training_pr', label: 'Обучение и консультация по запуску работы в 1С-ЭПД (ПР)', keyRef: 'epd_training_pr', modes: ['project'] },
+                { id: 'epd_transition_survey', label: 'Предпроектное обследование по переходу на ЭПД', keyRef: 'epd_transition_survey', modes: ['project'] },
+                { id: 'epd_config_update', label: 'Доработка конфигурации 1С для работы с ЭПД', keyRef: 'epd_config_update', modes: ['project'] }
+            ]
+        },
+        {
+            id: 'extra_1c', title: 'Дополнительные услуги',
+            items: [
+                { id: 'update_configs', label: 'Обновление типовых конфигураций', keyRef: 'update_configs', tiered: true },
+                { id: 'migrate_fresh', label: 'Перенос базы 1С из локальной 1С во Фреш', keyRef: 'migrate_fresh' },
+                { id: 'migrate_pc', label: 'Перенос базы 1С на другой компьютер', keyRef: 'migrate_pc' },
+                { id: 'install_thin_client', label: 'Установка тонкого клиента', keyRef: 'install_thin_client' }
+            ]
+        }
+    ],
+    MCHD_TYPES: ['base', 'ext', 'single', 'extra', 'start']
+};
+
+/**
+ * 2. СОСТОЯНИЕ (STATE)
+ */
+const State = {
+    data: {
+        mainMode: 'typical',
+        subMode: 'standard',
+        docsYearly: 0,
+        customDocsCount: null,
+        pricing: [],
+        customPrices: {},
+        extraServicesEnabled: false,
+        extraServices: [],
+        extraServiceSeq: 1,
+        ukepQty: 0,
+        ukepPeriod: 12,
+        sigType: null,
+        kcrDetails: { egais: 0, univ: 0, basis: 0 },
+        mchd: {
+            base: { active: false, qty: 0 },
+            ext: { active: false, qty: 0 },
+            single: { active: false, qty: 0 },
+            extra: { active: false, qty: 0 },
+            start: { active: false, qty: 0 }
+        },
+        addons: {},
+        validity: '30 дней',
+    },
+
+    initAddons() {
+        CONSTANTS.ADDONS.forEach(addon => {
+            this.data.addons[addon.id] = { enabled: false, values: {} };
+        });
+    },
+
+    createExtraService() {
+        const id = `extra-service-${this.data.extraServiceSeq++}`;
+        return { id, name: '', qty: '', price: '' };
+    },
+
+    initExtraServices() {
+        if (!this.data.extraServices.length) {
+            this.data.extraServices = [this.createExtraService()];
+        }
+    },
+
+    resetCalculation() {
+        this.data.docsYearly = 0;
+        this.data.customDocsCount = null;
+        this.data.customPrices = {};
+        this.data.extraServicesEnabled = false;
+        this.data.extraServices = [this.createExtraService()];
+        
+        this.data.ukepQty = 0;
+        this.data.ukepPeriod = 12;
+        this.data.sigType = null;
+        this.data.kcrDetails = { egais: 0, univ: 0, basis: 0 };
+        
+        this.data.mchd = {
+            base: { active: false, qty: 0 },
+            ext: { active: false, qty: 0 },
+            single: { active: false, qty: 0 },
+            extra: { active: false, qty: 0 },
+            start: { active: false, qty: 0 }
+        };
+        
+        this.data.addons = {};
+        this.initAddons();
+        
+        const docsMonthInput = document.getElementById('docs-month');
+        const docsYearInput = document.getElementById('docs-year');
+        if (docsMonthInput) docsMonthInput.value = '';
+        if (docsYearInput) docsYearInput.value = '';
+        
+        const ukepQtyInput = document.getElementById('ukep-qty');
+        if (ukepQtyInput) ukepQtyInput.value = '';
+        
+        const checkBasis = document.getElementById('check-basis');
+        const checkKcr = document.getElementById('check-kcr');
+        if (checkBasis) checkBasis.checked = false;
+        if (checkKcr) checkKcr.checked = false;
+        
+        document.querySelectorAll('[data-action="kcr-qty"]').forEach(input => {
+            input.value = '';
+        });
+        
+        CONSTANTS.MCHD_TYPES.forEach(type => {
+            const checkbox = document.getElementById(`check-mchd-${type}`);
+            const input = document.getElementById(`input-mchd-${type}`);
+            const card = document.getElementById(`card-mchd-${type}`);
+            if (checkbox) checkbox.checked = false;
+            if (input) input.value = '';
+            if (card) card.classList.remove('active');
+        });
+        
+        document.querySelectorAll('[data-click="set-ukep-period"]').forEach(btn => {
+            btn.classList.toggle('selected', btn.dataset.val === '12');
+        });
+        
+        const dynamicContent = document.getElementById('dynamic-content');
+        if (dynamicContent) {
+            dynamicContent.innerHTML = `
+                <div class="placeholder-text">
+                    Здесь будут параметры тарифа... <br>
+                    <strong>Введите количество документов</strong>
+                </div>`;
+        }
+        
+        const detailsContent = document.getElementById('details-content');
+        if (detailsContent) {
+            detailsContent.innerHTML = 'Введите данные для расчета...';
+        }
+        
+        const totalPrice = document.getElementById('total-price');
+        if (totalPrice) {
+            totalPrice.textContent = '0 ₽';
+        }
+    },
+
+    getPrice(key) {
+        if (!this.data.pricing.length || !key) return 0;
+        return Helpers.parseNum(this.data.pricing[0][key]);
+    },
+
+    getRawPrice(key, rowIndex = 0) {
+        if (!this.data.pricing[rowIndex] || !key) return undefined;
+        return this.data.pricing[rowIndex][key];
+    },
+    
+    getUnitPrice(key) {
+        if (!this.data.pricing.length || !key) return 0;
+        return Helpers.parseNum(this.data.pricing[1][key]);
+    },
+
+    getMinimumPrice(key) {
+        if (!this.data.pricing[2] || !key) return 0;
+        return Helpers.parseNum(this.data.pricing[2][key]);
+    }
+};
+
+/**
+ * 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+ */
+const Helpers = {
+    parseNum: (val) => {
+        if (val === undefined || val === null) return 0;
+        let cleaned = val.toString().replace(/\u00A0/g, '').replace(/\s/g, '').replace(',', '.');
+        return parseFloat(cleaned) || 0;
+    },
+    digitsOnly: (val) => (val || '').toString().replace(/\D/g, ''),
+    escapeHtml: (text) => (text || '').toString()
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;'),
+    stripHtml: (text) => (text || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim(),
+    isPlaceholderPrice: (val) => typeof val === 'string' && val.trim() === '-',
+    fmt: (num) => Math.round(num).toLocaleString('ru-RU'),
+    fmtDecimal: (num) => {
+        if (num % 1 === 0) return Math.round(num).toLocaleString('ru-RU');
+        return num.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0');
+    }
+};
+
+/**
+ * 4. ЛОГИКА РАСЧЕТА (CALCULATOR)
+ */
+const Calculator = {
+    getOptimalTariff(targetDocs) {
+        if (targetDocs <= 0) {
+            return { cost: 0, packages: [], totalDocs: 0, displayKey: '' };
+        }
+
+        const tariffKeys = CONSTANTS.KEYS.tariffs;
+        const pkgs = tariffKeys.map((key, i) => ({
+            key: key,
+            displayName: key.replace(/\n/g, ' ').replace(/ +/g, ' ').trim(),
+            docs: CONSTANTS.LIMITS[i],
+            price: State.getPrice(key)
+        }));
+
+        const MAX = Math.max(targetDocs + 100000, 200000);
+        let dp = new Array(MAX + 1).fill(Infinity);
+        dp[0] = 0;
+        let prev = new Array(MAX + 1).fill(null);
+
+        for (let p = 0; p < pkgs.length; p++) {
+            const pkg = pkgs[p];
+            for (let j = pkg.docs; j <= MAX; j++) {
+                if (dp[j - pkg.docs] !== Infinity) {
+                    const newCost = dp[j - pkg.docs] + pkg.price;
+                    if (newCost < dp[j]) {
+                        dp[j] = newCost;
+                        prev[j] = { pkgIdx: p, prevDocs: j - pkg.docs };
+                    }
+                }
+            }
+        }
+
+        let minCost = Infinity;
+        let bestJ = targetDocs;
+        for (let j = targetDocs; j <= MAX; j++) {
+            if (dp[j] < minCost) {
+                minCost = dp[j];
+                bestJ = j;
+            }
+        }
+
+        let used = new Array(pkgs.length).fill(0);
+        let curr = bestJ;
+        while (curr > 0 && prev[curr]) {
+            const pr = prev[curr];
+            used[pr.pkgIdx]++;
+            curr = pr.prevDocs;
+        }
+
+        let packages = [];
+        let totalD = 0;
+        for (let i = 0; i < pkgs.length; i++) {
+            if (used[i] > 0) {
+                const pkg = pkgs[i];
+                const subPrice = pkg.price * used[i];
+                packages.push({
+                    name: pkg.displayName,
+                    qty: used[i],
+                    unitPrice: pkg.price,
+                    price: subPrice
+                });
+                totalD += pkg.docs * used[i];
+            }
+        }
+
+        const displayKey = (packages.length === 1 && packages[0].qty === 1)
+            ? packages[0].name
+            : `Комбинация пакетов (${Helpers.fmt(totalD)} док.)`;
+
+        return {
+            cost: minCost,
+            packages: packages,
+            totalDocs: totalD,
+            displayKey: displayKey
+        };
+    },
+
+    calculateAll() {
+        if (!State.data.pricing.length) return { total: 0, lines: [] };
+
+        let total = 0;
+        let lines = [];
+
+        const tariffRes = this.calcTariff();
+        total += tariffRes.cost;
+        if (tariffRes.lines && tariffRes.lines.length) {
+            lines.push(...tariffRes.lines);
+        } else if (tariffRes.line) {
+            lines.push(tariffRes.line);
+        }
+        
+        if (State.data.mainMode === 'project' && State.data.docsYearly > 0) {
+            const pPrice = State.data.customPrices['project'] !== undefined 
+                ? State.data.customPrices['project'] 
+                : State.getPrice(CONSTANTS.KEYS.project);
+            total += pPrice;
+            lines.push(`Проектное решение: ${Helpers.fmt(pPrice)} ₽`);
+        }
+
+        const sigRes = this.calcSignatures();
+        total += sigRes.cost;
+        lines.push(...sigRes.lines);
+
+        const mchdRes = this.calcMCHD();
+        total += mchdRes.cost;
+        lines.push(...mchdRes.lines);
+
+        const addonRes = this.calcAddons();
+        total += addonRes.cost;
+        lines.push(...addonRes.lines);
+
+        const extraServicesRes = this.calcExtraServices();
+        total += extraServicesRes.cost;
+        lines.push(...extraServicesRes.lines);
+
+        return { total, lines, tariffMeta: tariffRes.meta, tariffPackages: (tariffRes.meta && tariffRes.meta.packages) ? tariffRes.meta.packages : null };
+    },
+
+    calcTariff() {
+        if (State.data.docsYearly <= 0) return { cost: 0, line: null, lines: [], meta: null };
+
+        if (State.data.subMode === 'individual') {
+            const limits = CONSTANTS.LIMITS;
+            let idx = limits.findIndex(l => l >= State.data.docsYearly);
+            const finalIdx = idx === -1 ? limits.length - 1 : idx;
+            
+            const key = CONSTANTS.KEYS.tariffs[finalIdx];
+            const limitVal = limits[finalIdx];
+            
+            const stdUnit = State.getUnitPrice(key);
+            const customUnit = State.data.customPrices['unit'];
+            const currentUnit = customUnit !== undefined ? customUnit : stdUnit;
+
+            const effectiveDocs = State.data.customDocsCount !== null ? State.data.customDocsCount : limitVal;
+            const cost = effectiveDocs * currentUnit;
+
+            const displayDocs = State.data.customDocsCount !== null ? State.data.customDocsCount : limitVal;
+            const displayKey = State.data.customDocsCount !== null
+                ? `1С-ЭПД ${Helpers.fmt(displayDocs)} документов`
+                : key.replace(/\n/g, ' ');
+
+            const line = `Тариф: ${displayKey} | ${Helpers.fmt(cost)} ₽`;
+
+            return { 
+                cost, line, lines: [line],
+                meta: { key, limitVal, basePrice: cost, unitPrice: currentUnit, effectiveDocs, displayKey } 
+            };
+        } else {
+            const opt = this.getOptimalTariff(State.data.docsYearly);
+            const cost = opt.cost;
+
+            let pricePerDoc = 0;
+            if (opt.totalDocs > 0) {
+                pricePerDoc = Math.round((cost / opt.totalDocs) * 100) / 100;
+            }
+
+            const lines = opt.packages.map(pkg => {
+                if (pkg.qty > 1) {
+                    return `Тариф: ${pkg.name} ${Helpers.fmt(pkg.unitPrice)} ₽ × ${pkg.qty} = ${Helpers.fmt(pkg.price)} ₽`;
+                } else {
+                    return `Тариф: ${pkg.name} × ${pkg.qty} = ${Helpers.fmt(pkg.price)} ₽`;
+                }
+            });
+
+            return { 
+                cost, 
+                line: lines[0] || `Тариф: ${opt.displayKey} | ${Helpers.fmt(cost)} ₽`,
+                lines,
+                meta: { 
+                    basePrice: cost, 
+                    totalDocs: opt.totalDocs,
+                    packages: opt.packages,
+                    pricePerDoc: pricePerDoc,
+                    displayKey: opt.displayKey,
+                } 
+            };
+        }
+    },
+
+    calcSignatures() {
+        const d = State.data;
+        let cost = 0;
+        let lines = [];
+
+        if (d.ukepQty > 0 && d.sigType) {
+            if (d.sigType === 'basis') {
+                const key = d.ukepPeriod === 15 ? CONSTANTS.KEYS.ukep15 : CONSTANTS.KEYS.ukep12;
+                const customPrice = State.data.customPrices[key];
+                const price = (State.data.subMode === 'individual' && customPrice !== undefined) 
+                    ? customPrice 
+                    : State.getPrice(key);
+                const sum = d.ukepQty * price;
+                cost += sum;
+                
+                if (d.ukepQty > 1) {
+                    lines.push(`УКЭП Базис (${d.ukepPeriod} мес.) ${Helpers.fmt(price)} ₽ x ${d.ukepQty}: ${Helpers.fmt(sum)} ₽`);
+                } else {
+                    lines.push(`УКЭП Базис (${d.ukepPeriod} мес.) x ${d.ukepQty}: ${Helpers.fmt(sum)} ₽`);
+                }
+            } else if (d.sigType === 'kcr') {
+                const customKcrPrice = State.data.customPrices[CONSTANTS.KEYS.kcr];
+                const kcrBase = (State.data.subMode === 'individual' && customKcrPrice !== undefined)
+                    ? customKcrPrice
+                    : State.getPrice(CONSTANTS.KEYS.kcr);
+                cost += kcrBase;
+                lines.push(`КЦР: ${Helpers.fmt(kcrBase)} ₽`);
+
+                const map = [
+                    { qty: d.kcrDetails.egais, key: CONSTANTS.KEYS.kepEgais, name: 'КЭП ЕГАИС' },
+                    { qty: d.kcrDetails.univ, key: CONSTANTS.KEYS.kepUniv, name: 'КЭП Универсальный' },
+                    { qty: d.kcrDetails.basis, key: CONSTANTS.KEYS.kepBasis, name: 'КЭП Базис' }
+                ];
+
+                map.forEach(item => {
+                    if (item.qty > 0) {
+                        const customP = State.data.customPrices[item.key];
+                        const price = (State.data.subMode === 'individual' && customP !== undefined)
+                            ? customP
+                            : State.getPrice(item.key);
+                        const sum = item.qty * price;
+                        cost += sum;
+                        
+                        if (item.qty > 1) {
+                            lines.push(`${item.name} ${Helpers.fmt(price)} ₽ x ${item.qty}: ${Helpers.fmt(sum)} ₽`);
+                        } else {
+                            lines.push(`${item.name} x ${item.qty}: ${Helpers.fmt(sum)} ₽`);
+                        }
+                    }
+                });
+            }
+        }
+        return { cost, lines };
+    },
+
+    calcMCHD() {
+        let cost = 0;
+        let lines = [];
+        
+        CONSTANTS.MCHD_TYPES.forEach(type => {
+            const item = State.data.mchd[type];
+            if (item.active && item.qty > 0) {
+                const key = CONSTANTS.KEYS.mchd[type];
+                const customPrice = State.data.customPrices[key];
+                const price = (State.data.subMode === 'individual' && customPrice !== undefined)
+                    ? customPrice
+                    : State.getPrice(key);
+                const sum = item.qty * price;
+                cost += sum;
+                
+                const name = (type === 'base') ? 'МЧД Базовый' : 
+                             (type === 'ext') ? 'МЧД Расширенный' :
+                             (type === 'single') ? 'Одна МЧД' :
+                             (type === 'extra') ? 'Доп. МЧД' : 'Старт МЧД (Астрал Доверенность)';
+                
+                if (item.qty > 1) {
+                    lines.push(`${name} ${Helpers.fmt(price)} ₽ x ${item.qty}: ${Helpers.fmt(sum)} ₽`);
+                } else {
+                    lines.push(`${name} x ${item.qty}: ${Helpers.fmt(sum)} ₽`);
+                }
+            }
+        });
+        return { cost, lines };
+    },
+
+    calcAddons() {
+        let cost = 0;
+        let lines = [];
+        const currentMode = State.data.mainMode;
+
+        CONSTANTS.ADDONS.forEach(addon => {
+            const addonState = State.data.addons[addon.id];
+            if (addonState.enabled) {
+                addon.items
+                    .filter(item => !item.modes || item.modes.includes(currentMode))
+                    .forEach(item => {
+                    const qty = addonState.values[item.id] || 0;
+                    if (qty > 0) {
+                        const serviceKey = CONSTANTS.KEYS.services[item.keyRef];
+                        const customP = State.data.customPrices[item.keyRef];
+                        const rawBasePrice = State.getRawPrice(serviceKey);
+                        const hasCustomPrice = State.data.subMode === 'individual' && customP !== undefined;
+                        const hasPlaceholderPrice = Helpers.isPlaceholderPrice(rawBasePrice);
+                        const minimumPrice = State.getMinimumPrice(serviceKey);
+                        const isHourly = minimumPrice > 0;
+                        const labelText = Helpers.stripHtml(item.label);
+
+                        if (!hasCustomPrice && hasPlaceholderPrice) {
+                            if (qty > 1) {
+                                lines.push(`${labelText} x ${qty}: -`);
+                            } else {
+                                lines.push(`${labelText}: -`);
+                            }
+                            return;
+                        }
+
+                        const price = hasCustomPrice ? customP : State.getPrice(serviceKey);
+
+                        if (isHourly) {
+                            const baseSum = price * qty;
+                            const sum = Math.max(baseSum, minimumPrice);
+                            cost += sum;
+                            lines.push(`${labelText} ${Helpers.fmt(price)} ₽ x ${qty} ч.: ${Helpers.fmt(sum)} ₽`);
+                        } else {
+                            const sum = price * qty;
+                            cost += sum;
+
+                            if (qty > 1) {
+                                lines.push(`${labelText} ${Helpers.fmt(price)} ₽ x ${qty}: ${Helpers.fmt(sum)} ₽`);
+                            } else {
+                                lines.push(`${labelText} x ${qty}: ${Helpers.fmt(sum)} ₽`);
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        return { cost, lines };
+    },
+
+    calcExtraServices() {
+        if (!State.data.extraServicesEnabled) return { cost: 0, lines: [] };
+
+        let cost = 0;
+        let lines = [];
+
+        State.data.extraServices.forEach(item => {
+            const qty = parseInt(item.qty, 10) || 0;
+            const price = parseInt(item.price, 10) || 0;
+            if (qty <= 0 || price <= 0) return;
+
+            const serviceName = item.name.trim() || 'Прочая услуга';
+            const sum = qty * price;
+            cost += sum;
+            lines.push(`${serviceName} ${Helpers.fmt(price)} ₽ x ${qty}: ${Helpers.fmt(sum)} ₽`);
+        });
+
+        return { cost, lines };
+    }
+};
+
+/**
+ * 5. ОТРИСОВКА (UI)
+ */
+const UI = {
+    els: {},
+    isInScope(target) {
+        const panel = document.getElementById('panel-epd');
+        return !panel || panel.contains(target);
+    },
+
+    init() {
+        this.renderAddonsHTML();
+        this.renderExtraServices();
+        this.cacheElements();
+        this.bindEvents();
+    },
+
+    cacheElements() {
+        const ids = ['dynamic-content', 'total-price', 'details-content', 'docs-month', 'docs-year', 
+                     'card-basis', 'card-kcr', 'check-basis', 'check-kcr', 'ukep-qty', 'extra-services-list',
+                     'extra-services-content', 'check-extra-services', 'extra-services-card'];
+        ids.forEach(id => this.els[id] = document.getElementById(id));
+    },
+
+    getVisibleAddonItems(addon, currentMode = State.data.mainMode) {
+        return addon.items.filter(item => !item.modes || item.modes.includes(currentMode));
+    },
+
+    renderAddonsHTML() {
+        const container = document.getElementById('addons-container');
+        if (!container) return;
+
+        const isInd = State.data.subMode === 'individual';
+        const currentMode = State.data.mainMode;
+
+        container.innerHTML = `<h3 class="section-title">Сервисные услуги</h3>` + 
+            CONSTANTS.ADDONS.map(addon => {
+                const itemsToRender = this.getVisibleAddonItems(addon, currentMode);
+                if (!itemsToRender.length) return '';
+
+                const addonState = State.data.addons[addon.id];
+
+                const customPriceBlock = isInd ? `
+                    <details class="card-price-details" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 10px;">
+                        <summary class="custom-price-summary">Изменить стоимость</summary>
+                        <div class="custom-price-content">
+                            ${itemsToRender.map(item => {
+                                const savedPrice = State.data.customPrices[item.keyRef] !== undefined ? State.data.customPrices[item.keyRef] : '';
+                                const serviceKey = CONSTANTS.KEYS.services[item.keyRef];
+                                const defaultPriceRaw = State.getRawPrice(serviceKey);
+                                const defaultPrice = Helpers.isPlaceholderPrice(defaultPriceRaw) ? '-' : State.getPrice(serviceKey);
+                                const minimumPrice = State.getMinimumPrice(serviceKey);
+                                const labelText = Helpers.stripHtml(item.label);
+                                return `
+                                <div class="custom-price-row">
+                                    <span>${labelText}${minimumPrice > 0 ? ` (мин. ${Helpers.fmt(minimumPrice)} ₽)` : ''}</span>
+                                    <input type="number" min="0" value="${savedPrice}" placeholder="${defaultPrice}" 
+                                        class="custom-price-input"
+                                        onkeydown="if(['-', 'e', 'E', ',', '.'].includes(event.key)) event.preventDefault();" 
+                                        oninput="window.updateServicePrice('${item.keyRef}', this.value)">
+                                </div>`;
+                            }).join('')}
+                        </div>
+                    </details>` : '';
+
+                return `
+                    <div class="addon-card ${addonState.enabled ? 'active' : ''}" id="addon-card-${addon.id}">
+                        <div class="addon-header">
+                            <span class="addon-title">${addon.title}</span>
+                            <label class="custom-switch">
+                                <input type="checkbox" data-action="toggle-addon" data-id="${addon.id}" ${addonState.enabled ? 'checked' : ''}>
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                        <div id="addon-items-${addon.id}" style="display:${addonState.enabled ? 'block' : 'none'}; margin-top:10px;">
+                            ${itemsToRender.map(item => {
+                                const serviceKey = CONSTANTS.KEYS.services[item.keyRef];
+                                const minimumPrice = State.getMinimumPrice(serviceKey);
+                                const hasPlaceholderPrice = Helpers.isPlaceholderPrice(State.getRawPrice(serviceKey));
+                                const hourlyPrice = State.data.subMode === 'individual' && State.data.customPrices[item.keyRef] !== undefined
+                                    ? State.data.customPrices[item.keyRef]
+                                    : State.getPrice(serviceKey);
+                                const minimumHours = minimumPrice > 0 && hourlyPrice > 0
+                                    ? Math.ceil(minimumPrice / hourlyPrice)
+                                    : 0;
+                                const unitLabel = minimumPrice > 0 ? 'ч.' : 'шт.';
+                                const metaText = minimumPrice > 0
+                                    ? `Почасовая работа, ${Helpers.fmt(hourlyPrice)} ₽/ч, минимум ${minimumHours} ч.`
+                                    : hasPlaceholderPrice
+                                        ? 'Цена пока не указана'
+                                        : '';
+
+                                return `
+                                <div class="variant-row ${minimumPrice > 0 ? 'variant-row-hourly' : ''} ${hasPlaceholderPrice ? 'variant-row-placeholder' : ''}">
+                                    <div class="variant-text">
+                                        <span class="v-label">${item.label}</span>
+                                        ${metaText ? `<span class="variant-meta">${metaText}</span>` : ''}
+                                    </div>
+                                    <div class="v-controls">
+                                        <input type="number" class="qty-input" min="0" 
+                                            value="${addonState.values[item.id] || ''}"
+                                            placeholder="0" 
+                                            data-action="update-addon" data-addon="${addon.id}" data-item="${item.id}">
+                                        <span class="unit-text">${unitLabel}</span>
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                            ${customPriceBlock}
+                        </div>
+                    </div>`;
+            }).join('');
+    },
+
+    renderExtraServices() {
+        const container = this.els['extra-services-list'] || document.getElementById('extra-services-list');
+        if (!container) return;
+        const content = this.els['extra-services-content'] || document.getElementById('extra-services-content');
+        const checkbox = this.els['check-extra-services'] || document.getElementById('check-extra-services');
+        const card = this.els['extra-services-card'] || document.getElementById('extra-services-card');
+
+        if (checkbox) checkbox.checked = State.data.extraServicesEnabled;
+        if (content) content.style.display = State.data.extraServicesEnabled ? 'block' : 'none';
+        if (card) card.classList.toggle('active', State.data.extraServicesEnabled);
+
+        if (!State.data.extraServicesEnabled) {
+            container.innerHTML = '';
+            return;
+        }
+
+        if (!State.data.extraServices.length) {
+            container.innerHTML = `<div class="extra-services-empty">Добавьте строку, чтобы включить прочие услуги в расчёт.</div>`;
+            return;
+        }
+
+        container.innerHTML = `
+            <div class="extra-service-grid extra-service-grid-head">
+                <span>Наименование</span>
+                <span>Количество</span>
+                <span>Цена</span>
+                <span></span>
+            </div>
+            <div class="extra-service-list">
+                ${State.data.extraServices.map(item => `
+                    <div class="extra-service-grid extra-service-row" data-row-id="${item.id}">
+                        <input type="text" class="extra-service-input extra-service-name" placeholder="Наименование услуги"
+                            value="${Helpers.escapeHtml(item.name)}"
+                            data-action="extra-service-name" data-id="${item.id}">
+                        <input type="text" class="extra-service-input extra-service-number" placeholder="0"
+                            inputmode="numeric" autocomplete="off" data-digits-only="true"
+                            value="${item.qty}"
+                            data-action="extra-service-qty" data-id="${item.id}">
+                        <input type="text" class="extra-service-input extra-service-number" placeholder="0"
+                            inputmode="numeric" autocomplete="off" data-digits-only="true"
+                            value="${item.price}"
+                            data-action="extra-service-price" data-id="${item.id}">
+                        <button type="button" class="extra-service-remove-btn" data-click="remove-extra-service" data-id="${item.id}">Удалить</button>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    },
+
+    update() {
+        const result = Calculator.calculateAll();
+        
+        this.els['total-price'].textContent = Helpers.fmt(result.total) + ' ₽';
+        this.els['details-content'].innerHTML = result.lines.map(line => Helpers.escapeHtml(line)).join('<br>');
+        this.renderTariffCard(result.tariffMeta);
+        this.updateSignaturesUI();
+    },
+        
+    renderTariffCard(meta) {
+        const container = this.els['dynamic-content'];
+        if (!meta) {
+            container.innerHTML = `<div class="placeholder-text">Введите количество документов</div>`;
+            return;
+        }
+
+        const isInd = State.data.subMode === 'individual';
+        const isProject = State.data.mainMode === 'project';
+
+        let tariffHTML = '';
+
+        if (isInd) {
+            const displayUnit = meta.unitPrice.toString().replace('.', ',');
+            const unitInputHtml = `<input type="text" class="tariff-field-input" value="${displayUnit}" data-action="custom-price" data-type="unit">`;
+            const customDocsVal = State.data.customDocsCount !== null ? State.data.customDocsCount : meta.limitVal;
+            const docsInputHtml = `<input type="number" class="tariff-field-input" min="1" value="${customDocsVal}" data-action="custom-price" data-type="docs-count">`;
+
+            tariffHTML = `
+                <div class="detail-row">
+                    <span>Пакет (документов)</span>
+                    <div class="price-edit-block">${docsInputHtml}<span class="unit-text">шт.</span></div>
+                </div>
+                <div class="detail-row">
+                    <span>Стоимость пакета</span>
+                    <div class="price-edit-block"><strong>${Helpers.fmt(meta.basePrice)}</strong><span class="unit-text">₽</span></div>
+                </div>
+                <div class="detail-row highlight">
+                    <span>Цена за 1 документ</span>
+                    <div class="price-edit-block">${unitInputHtml}<span class="unit-text">₽</span></div>
+                </div>`;
+        } else {
+            let packagesRows = meta.packages.map(p => `
+                <div class="detail-row">
+                    <span>${p.qty > 1 ? p.qty + ' × ' : ''}${p.name}</span>
+                    <div class="price-edit-block"><strong>${Helpers.fmt(p.price)}</strong><span class="unit-text">₽</span></div>
+                </div>
+            `).join('');
+
+            let pricePerDocRow = '';
+            if (meta.pricePerDoc > 0) {
+                pricePerDocRow = `
+                    <div class="detail-row highlight">
+                        <span>Стоимость за 1 документ</span>
+                        <div class="price-edit-block"><strong>${Helpers.fmtDecimal(meta.pricePerDoc)}</strong><span class="unit-text">₽</span></div>
+                    </div>`;
+            }
+
+            tariffHTML = packagesRows + `
+                <div class="detail-row highlight">
+                    <span>Всего документов</span>
+                    <div class="price-edit-block"><strong>${Helpers.fmt(meta.totalDocs)}</strong><span class="unit-text">шт.</span></div>
+                </div>
+                <div class="detail-row highlight">
+                    <span>Стоимость тарифа</span>
+                    <div class="price-edit-block"><strong>${Helpers.fmt(meta.basePrice)}</strong><span class="unit-text">₽</span></div>
+                </div>
+                ${pricePerDocRow}`;
+        }
+
+        let projectHtml = '';
+        if (isProject) {
+            const pPrice = State.data.customPrices['project'] !== undefined 
+                ? State.data.customPrices['project'] 
+                : State.getPrice(CONSTANTS.KEYS.project);
+            const pInput = isInd
+                ? `<input type="text" class="tariff-field-input" value="${pPrice.toString().replace('.', ',')}" data-action="custom-price" data-type="project">`
+                : `<strong>${Helpers.fmt(pPrice)}</strong>`;
+
+            projectHtml = `
+                <div class="detail-row project-row">
+                    <span>Проектное решение</span>
+                    <div class="price-edit-block">${pInput}<span class="unit-text">₽</span></div>
+                </div>`;
+        }
+
+        const labelText = isInd 
+            ? 'Индивидуальные условия' 
+            : (meta.packages.length > 1 || (meta.packages.length === 1 && meta.packages[0].qty > 1) 
+                ? 'Оптимальная комбинация' 
+                : 'Стандартный тариф');
+
+        container.innerHTML = `
+            <div class="tariff-card animated-fade ${isInd ? 'individual-mode' : ''}">
+                <div class="tariff-header">
+                    <span class="tariff-label">${labelText}</span>
+                    <h3 class="tariff-title">${meta.displayKey}</h3>
+                </div>
+                <div class="detailing-section">
+                    ${tariffHTML}
+                    ${projectHtml}
+                </div>
+            </div>`;
+    },
+
+    updateSignaturesUI() {
+        const d = State.data;
+        const isLocked = d.ukepQty < 6;
+        const isInd = State.data.subMode === 'individual';
+        
+        if (isLocked && d.sigType === 'kcr') {
+            State.data.sigType = null;
+        }
+
+        this.els['card-kcr'].classList.toggle('locked', isLocked);
+        this.els['card-basis'].classList.toggle('active', d.sigType === 'basis');
+        this.els['card-kcr'].classList.toggle('active', d.sigType === 'kcr');
+        
+        const kcrOptionsContainer = document.getElementById('kcr-options-container');
+        if (kcrOptionsContainer) {
+            kcrOptionsContainer.style.display = (d.sigType === 'kcr') ? 'block' : 'none';
+        }
+        
+        this.els['check-basis'].checked = (d.sigType === 'basis');
+        this.els['check-kcr'].checked = (d.sigType === 'kcr');
+
+        const btn12 = document.querySelector('[data-click="set-ukep-period"][data-val="12"]');
+        const btn15 = document.querySelector('[data-click="set-ukep-period"][data-val="15"]');
+        if (btn12 && btn15) {
+            btn12.classList.toggle('selected', d.ukepPeriod === 12);
+            btn15.classList.toggle('selected', d.ukepPeriod === 15);
+        }
+
+        this.updateBasisPricing(isInd);
+        this.updateKCRPricing(isInd);
+        this.updateMCHDPricing(isInd);
+    },
+
+    updateBasisPricing(isInd) {
+        const container = document.getElementById('basis-pricing-container');
+        if (!container) return;
+
+        if (!isInd || State.data.sigType !== 'basis') {
+            container.innerHTML = '';
+            return;
+        }
+
+        const ukep12Price = State.data.customPrices[CONSTANTS.KEYS.ukep12] || '';
+        const ukep15Price = State.data.customPrices[CONSTANTS.KEYS.ukep15] || '';
+
+        container.innerHTML = `
+            <details class="card-price-details" style="margin-top: 10px;">
+                <summary class="custom-price-summary">Изменить стоимость</summary>
+                <div class="custom-price-content">
+                    <div class="custom-price-row">
+                        <span>12 месяцев</span>
+                        <input type="number" min="0" placeholder="${State.getPrice(CONSTANTS.KEYS.ukep12)}" 
+                            value="${ukep12Price}" class="custom-price-input"
+                            onkeydown="if(['-', 'e', 'E', ',', '.'].includes(event.key)) event.preventDefault();"
+                            oninput="window.updateCustomPrice('${CONSTANTS.KEYS.ukep12}', this.value)">
+                    </div>
+                    <div class="custom-price-row">
+                        <span>15 месяцев</span>
+                        <input type="number" min="0" placeholder="${State.getPrice(CONSTANTS.KEYS.ukep15)}" 
+                            value="${ukep15Price}" class="custom-price-input"
+                            onkeydown="if(['-', 'e', 'E', ',', '.'].includes(event.key)) event.preventDefault();"
+                            oninput="window.updateCustomPrice('${CONSTANTS.KEYS.ukep15}', this.value)">
+                    </div>
+                </div>
+            </details>
+        `;
+    },
+
+    updateKCRPricing(isInd) {
+        const container = document.getElementById('kcr-pricing-container');
+        if (!container) return;
+
+        if (!isInd || State.data.sigType !== 'kcr') {
+            container.innerHTML = '';
+            return;
+        }
+
+        const kcrPrice = State.data.customPrices[CONSTANTS.KEYS.kcr] || '';
+        const kepEgaisPrice = State.data.customPrices[CONSTANTS.KEYS.kepEgais] || '';
+        const kepUnivPrice = State.data.customPrices[CONSTANTS.KEYS.kepUniv] || '';
+        const kepBasisPrice = State.data.customPrices[CONSTANTS.KEYS.kepBasis] || '';
+
+        container.innerHTML = `
+            <details class="card-price-details" style="margin-top: 10px;">
+                <summary class="custom-price-summary">Изменить стоимость</summary>
+                <div class="custom-price-content">
+                    <div class="custom-price-row">
+                        <span>КЦР (базовая)</span>
+                        <input type="number" min="0" placeholder="${State.getPrice(CONSTANTS.KEYS.kcr)}" 
+                            value="${kcrPrice}" class="custom-price-input"
+                            onkeydown="if(['-', 'e', 'E', ',', '.'].includes(event.key)) event.preventDefault();"
+                            oninput="window.updateCustomPrice('${CONSTANTS.KEYS.kcr}', this.value)">
+                    </div>
+                    <div class="custom-price-row">
+                        <span>КЭП ЕГАИС</span>
+                        <input type="number" min="0" placeholder="${State.getPrice(CONSTANTS.KEYS.kepEgais)}" 
+                            value="${kepEgaisPrice}" class="custom-price-input"
+                            onkeydown="if(['-', 'e', 'E', ',', '.'].includes(event.key)) event.preventDefault();"
+                            oninput="window.updateCustomPrice('${CONSTANTS.KEYS.kepEgais}', this.value)">
+                    </div>
+                    <div class="custom-price-row">
+                        <span>КЭП Универс.</span>
+                        <input type="number" min="0" placeholder="${State.getPrice(CONSTANTS.KEYS.kepUniv)}" 
+                            value="${kepUnivPrice}" class="custom-price-input"
+                            onkeydown="if(['-', 'e', 'E', ',', '.'].includes(event.key)) event.preventDefault();"
+                            oninput="window.updateCustomPrice('${CONSTANTS.KEYS.kepUniv}', this.value)">
+                    </div>
+                    <div class="custom-price-row">
+                        <span>КЭП Базис</span>
+                        <input type="number" min="0" placeholder="${State.getPrice(CONSTANTS.KEYS.kepBasis)}" 
+                            value="${kepBasisPrice}" class="custom-price-input"
+                            onkeydown="if(['-', 'e', 'E', ',', '.'].includes(event.key)) event.preventDefault();"
+                            oninput="window.updateCustomPrice('${CONSTANTS.KEYS.kepBasis}', this.value)">
+                    </div>
+                </div>
+            </details>
+        `;
+    },
+
+    updateMCHDPricing(isInd) {
+        const mchdTypes = [
+            { id: 'base',   key: CONSTANTS.KEYS.mchd.base,   name: 'Базовый' },
+            { id: 'ext',    key: CONSTANTS.KEYS.mchd.ext,    name: 'Расширенный' },
+            { id: 'single', key: CONSTANTS.KEYS.mchd.single, name: 'Одна МЧД' },
+            { id: 'extra',  key: CONSTANTS.KEYS.mchd.extra,  name: 'Доп. МЧД' },
+            { id: 'start',  key: CONSTANTS.KEYS.mchd.start,  name: 'Старт МЧД (Астрал Доверенность)' }
+        ];
+
+        mchdTypes.forEach(type => {
+            const container = document.getElementById(`mchd-${type.id}-pricing-container`);
+            if (!container) return;
+
+            if (!isInd || !State.data.mchd[type.id].active) {
+                container.innerHTML = '';
+                return;
+            }
+
+            const customPrice = State.data.customPrices[type.key] || '';
+
+            container.innerHTML = `
+                <details class="card-price-details" style="margin-top: 10px;">
+                    <summary class="custom-price-summary">Изменить стоимость</summary>
+                    <div class="custom-price-content">
+                        <div class="custom-price-row">
+                            <span>Стоимость</span>
+                            <input type="number" min="0" placeholder="${State.getPrice(type.key)}" 
+                                value="${customPrice}" class="custom-price-input"
+                                onkeydown="if(['-', 'e', 'E', ',', '.'].includes(event.key)) event.preventDefault();"
+                                oninput="window.updateCustomPrice('${type.key}', this.value)">
+                        </div>
+                    </div>
+                </details>
+            `;
+        });
+    },
+
+    bindEvents() {
+        document.body.addEventListener('input', (e) => this.handleInput(e));
+        document.body.addEventListener('change', (e) => this.handleChange(e));
+        document.body.addEventListener('click', (e) => this.handleClick(e));
+        document.body.addEventListener('keydown', (e) => {
+            if (!this.isInScope(e.target)) return;
+            const t = e.target;
+            if (!t || t.dataset.digitsOnly !== 'true') return;
+            if (e.ctrlKey || e.metaKey) return;
+
+            const allowedKeys = ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Home', 'End'];
+            if (!/^\d$/.test(e.key) && !allowedKeys.includes(e.key)) {
+                e.preventDefault();
+            }
+        });
+
+        document.body.addEventListener('focus', (e) => {
+            if (!this.isInScope(e.target)) return;
+            const t = e.target;
+            if (t.type === 'number' && t.classList.contains('qty-input')) {
+                if (t.value === '0') {
+                    t.value = '';
+                }
+            }
+        }, true);
+    },
+
+    handleInput(e) {
+        if (!this.isInScope(e.target)) return;
+        const t = e.target;
+        const act = t.dataset.action;
+        const val = t.value;
+
+        if (act === 'docs-month') {
+            State.data.docsYearly = (parseInt(val)||0) * 12;
+            State.data.customDocsCount = null;
+            this.els['docs-year'].value = State.data.docsYearly;
+            this.update();
+        } 
+        else if (act === 'docs-year') {
+            State.data.docsYearly = parseInt(val)||0;
+            State.data.customDocsCount = null;
+            this.els['docs-month'].value = Math.round(State.data.docsYearly / 12);
+            this.update();
+        }
+        else if (act === 'ukep-qty') {
+            const numVal = parseInt(val) || 0;
+            State.data.ukepQty = Math.max(0, numVal);
+            this.update();
+        }
+        else if (act === 'kcr-qty') {
+            const field = t.dataset.field;
+            const numVal = parseInt(val) || 0;
+            State.data.kcrDetails[field] = Math.max(0, numVal);
+            this.update();
+        }
+        else if (act === 'mchd-qty') {
+            const type = t.dataset.type;
+            const numVal = parseInt(val) || 0;
+            State.data.mchd[type].qty = Math.max(0, numVal);
+            this.update();
+        }
+        else if (act === 'update-addon') {
+            const { addon, item } = t.dataset;
+            State.data.addons[addon].values[item] = Math.max(0, parseInt(val)||0);
+            this.update();
+        }
+        else if (act === 'extra-service-name') {
+            const row = State.data.extraServices.find(item => item.id === t.dataset.id);
+            if (!row) return;
+            row.name = val;
+            this.update();
+        }
+        else if (act === 'extra-service-qty' || act === 'extra-service-price') {
+            const row = State.data.extraServices.find(item => item.id === t.dataset.id);
+            if (!row) return;
+
+            const digits = Helpers.digitsOnly(val);
+            t.value = digits;
+            row[act === 'extra-service-qty' ? 'qty' : 'price'] = digits;
+            this.update();
+        }
+    },
+
+    handleChange(e) {
+        if (!this.isInScope(e.target)) return;
+        const t = e.target;
+        const act = t.dataset.action;
+
+        if (act === 'custom-price') {
+            const type = t.dataset.type;
+            if (type === 'docs-count') {
+                const num = parseInt(t.value) || null;
+                State.data.customDocsCount = num && num > 0 ? num : null;
+                this.update();
+            } else {
+                const floatVal = parseFloat(t.value.replace(',', '.')) || 0;
+                State.data.customPrices[type] = floatVal;
+                this.update();
+            }
+        }
+        else if (act === 'toggle-sig') {
+            const type = t.dataset.val;
+            const checked = t.checked;
+            
+            if (checked) {
+                if (type === 'kcr' && State.data.ukepQty < 6) {
+                    t.checked = false;
+                    return;
+                }
+                State.data.sigType = type;
+            } else {
+                if (State.data.sigType === type) {
+                    State.data.sigType = null;
+                }
+            }
+            
+            this.update();
+        }
+        else if (act === 'toggle-mchd') {
+            const type = t.dataset.type;
+            const checked = t.checked;
+            State.data.mchd[type].active = checked;
+            
+            document.getElementById(`card-mchd-${type}`).classList.toggle('active', checked);
+            if (checked) {
+                if (!State.data.mchd[type].qty) {
+                    State.data.mchd[type].qty = 1;
+                    document.getElementById(`input-mchd-${type}`).value = 1;
+                }
+            } else {
+                State.data.mchd[type].qty = 0;
+                const inputField = document.getElementById(`input-mchd-${type}`);
+                if (inputField) {
+                    inputField.value = '';
+                }
+            }
+            this.update();
+        }
+        else if (act === 'toggle-addon') {
+            const id = t.dataset.id;
+            State.data.addons[id].enabled = t.checked;
+            document.getElementById(`addon-items-${id}`).style.display = t.checked ? 'block' : 'none';
+            document.getElementById(`addon-card-${id}`).classList.toggle('active', t.checked);
+            this.update();
+        }
+        else if (act === 'toggle-extra-services') {
+            State.data.extraServicesEnabled = t.checked;
+            this.renderExtraServices();
+            this.update();
+        }
+    },
+
+    handleClick(e) {
+        if (!this.isInScope(e.target)) return;
+        const t = e.target.closest('[data-click]');
+        if (!t) return;
+        
+        const act = t.dataset.click;
+        
+        if (act === 'set-mode') {
+            const group = t.closest('.toggle-group');
+            group.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('selected'));
+            t.classList.add('selected');
+            
+            State.data.mainMode = t.dataset.val;
+            
+            State.resetCalculation();
+            
+            this.renderAddonsHTML();
+            this.renderExtraServices();
+            this.update();
+        }
+        else if (act === 'set-submode') {
+            const group = t.closest('.toggle-group');
+            group.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('selected'));
+            t.classList.add('selected');
+            
+            State.data.subMode = t.dataset.val;
+            if (State.data.subMode === 'standard') {
+                State.data.customPrices = {};
+                State.data.customDocsCount = null;
+            }
+            
+            this.renderAddonsHTML();
+            this.update();
+        }
+        else if (act === 'set-ukep-period') {
+            e.stopPropagation();
+            State.data.ukepPeriod = parseInt(t.dataset.val);
+            this.update();
+        }
+        else if (act === 'add-extra-service') {
+            State.data.extraServices.push(State.createExtraService());
+            this.renderExtraServices();
+            this.update();
+        }
+        else if (act === 'remove-extra-service') {
+            const id = t.dataset.id;
+            State.data.extraServices = State.data.extraServices.filter(item => item.id !== id);
+            this.renderExtraServices();
+            this.update();
+        }
+    }
+};
+
+/**
+ * 6. ИНИЦИАЛИЗАЦИЯ
+ */
+let __epdBootstrapped = false;
+async function bootstrapEPD() {
+    if (__epdBootstrapped) return;
+    __epdBootstrapped = true;
+
+    if (State.data.validity === '30 дней') {
+        const date = new Date();
+        date.setDate(date.getDate() + 30);
+        State.data.validity = date.toLocaleDateString('ru-RU');
+    }
+    State.initAddons();
+    State.initExtraServices();
+    UI.init();
+
+    const contactFields = ['partner-name', 'partner-phone', 'partner-email', 'client-name'];
+    contactFields.forEach(fieldId => {
+        const saved = localStorage.getItem(`epd-${fieldId}`);
+        const element = document.getElementById(fieldId);
+        if (saved && element) {
+            element.value = saved;
+        }
+        if (element) {
+            element.addEventListener('input', (e) => {
+                localStorage.setItem(`epd-${fieldId}`, e.target.value);
+            });
+        }
+    });
+
+    const getScriptBaseUrl = () => {
+        const script = Array.from(document.scripts).find(s =>
+            /(?:epd-calc-script|app)\.js(?:$|\?)/i.test(s.src || '')
+        );
+        if (!script || !script.src) return null;
+        try {
+            return new URL('.', script.src);
+        } catch {
+            return null;
+        }
+    };
+
+    const getPriceFileCandidates = () => {
+        const globalPriceNames =
+            window.__CALC_APP_RESOURCES &&
+            window.__CALC_APP_RESOURCES.prices &&
+            window.__CALC_APP_RESOURCES.prices.epd;
+        const names = Array.isArray(globalPriceNames) && globalPriceNames.length
+            ? globalPriceNames
+            : ['epd-tariffs.json'];
+        const urls = [];
+
+        names.forEach(name => {
+            urls.push(name);
+            urls.push(`./${name}`);
+            urls.push(encodeURI(name));
+            urls.push(`./${encodeURI(name)}`);
+        });
+
+        const scriptBase = getScriptBaseUrl();
+        if (scriptBase) {
+            names.forEach(name => {
+                urls.push(new URL(name, scriptBase).href);
+                urls.push(new URL(encodeURI(name), scriptBase).href);
+            });
+        }
+
+        return [...new Set(urls)];
+    };
+
+    let loaded = false;
+
+    try {
+        if (window.__CALC_PRELOAD_PRICES_PROMISE) {
+            await window.__CALC_PRELOAD_PRICES_PROMISE;
+        }
+    } catch {}
+
+    const preloaded = window.__CALC_PRELOADED_DATA && window.__CALC_PRELOADED_DATA.epd;
+    if (Array.isArray(preloaded)) {
+        State.data.pricing = preloaded;
+        loaded = true;
+    } else if (preloaded && typeof preloaded === 'object' && !Array.isArray(preloaded) && Object.keys(preloaded).length) {
+        State.data.pricing = [preloaded];
+        loaded = true;
+    } else {
+            const candidates = getPriceFileCandidates('epd', 'epd-tariffs.json');
+
+        for (const url of candidates) {
+            try {
+                const res = await fetch(url, { cache: 'no-store' });
+                if (!res.ok) continue;
+
+                const text = await res.text();
+                const trimmed = text.trim();
+                try {
+                    State.data.pricing = JSON.parse(trimmed);
+                } catch (e1) {
+                    try {
+                        State.data.pricing = JSON.parse(`[${trimmed}]`);
+                    } catch (e2) {
+                        State.data.pricing = JSON.parse("[" + trimmed.replace(/}\s*,?\s*{/g, "},{") + "]");
+                    }
+                }
+
+                loaded = true;
+                break;
+            } catch (e) {
+            }
+        }
+    }
+
+    UI.update();
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrapEPD);
+} else {
+    bootstrapEPD();
+}
+
+window.toggleValidityDropdown = () => {
+    const drop = document.getElementById('kp-validity-dropdown');
+    if (drop) drop.style.display = drop.style.display === 'none' ? 'block' : 'none';
+};
+
+window.handleValidityChange = (val) => {
+    const display = document.getElementById('kp-validity-display');
+    if (val === 'custom') {
+        document.getElementById('kp-validity-date-picker').showPicker();
+    } else {
+        const date = new Date();
+        date.setDate(date.getDate() + parseInt(val));
+        State.data.validity = date.toLocaleDateString('ru-RU');
+        if (display) display.textContent = `${val} дней (до ${State.data.validity})`;
+        const drop = document.getElementById('kp-validity-dropdown');
+        if (drop) drop.style.display = 'none';
+    }
+};
+
+window.handleCustomDatePick = (date) => {
+    if (!date) return;
+    const d = new Date(date);
+    State.data.validity = d.toLocaleDateString('ru-RU');
+    const display = document.getElementById('kp-validity-display');
+    if (display) display.textContent = State.data.validity;
+    const drop = document.getElementById('kp-validity-dropdown');
+    if (drop) drop.style.display = 'none';
+};
+
+window.downloadKPEPD = async () => {
+    const result = Calculator.calculateAll();
+    if (result.total === 0) {
+        alert('Сначала сделайте расчет!');
+        return;
+    }
+
+    const partnerName  = document.getElementById('partner-name')?.value.trim()  || '';
+    const clientName   = document.getElementById('client-name')?.value.trim()   || 'Клиент';
+    const partnerPhone = document.getElementById('partner-phone')?.value.trim() || '';
+    const partnerEmail = document.getElementById('partner-email')?.value.trim() || '';
+
+    const isTypical = State.data.mainMode === 'typical';
+    const prefix    = isTypical ? 'epd-pdf-base' : 'epd-pdf-project';
+
+    async function toBase64(url) {
+        try {
+            const res = await fetch(url);
+            if (!res.ok) return '';
+            const blob = await res.blob();
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload  = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        } catch (e) { return ''; }
+    }
+
+    const [b64Header, b64Middle, b64Footer] = await Promise.all([
+        toBase64(`${prefix}-header.jpg`),
+        toBase64(`${prefix}-middle.jpg`),
+        toBase64(`${prefix}-footer.jpg`),
+    ]);
+
+    const lines = result.lines
+        .map(l => l.replace(/<[^>]*>?/gm, '').trim())
+        .filter(Boolean);
+
+    function parseTariffPackageLine(line, packages) {
+        const m = line.match(/^Тариф:\s*(.+?)\s*=\s*([\d\s]+)\s*₽\s*$/);
+        if (m) {
+            const nameAndQty = m[1].trim();
+            const totalPriceStr = m[2].trim() + ' ₽';
+            const crossIdx = nameAndQty.lastIndexOf('×');
+            if (crossIdx !== -1) {
+                const pkgName = nameAndQty.slice(0, crossIdx).trim();
+                const qty = nameAndQty.slice(crossIdx + 1).trim();
+                let unitPriceFmt = '';
+                if (packages) {
+                    const found = packages.find(p => p.name === pkgName);
+                    if (found && found.unitPrice) unitPriceFmt = Helpers.fmt(found.unitPrice);
+                }
+                return {
+                    title: `${pkgName}${unitPriceFmt ? ' ' + unitPriceFmt + ' ₽' : ''} × ${qty}`,
+                    price: totalPriceStr
+                };
+            }
+            return { title: nameAndQty, price: totalPriceStr };
+        }
+        return null;
+    }
+
+    const PRICE_RE = /(\d[\d\s]*[\d])\s*[РрPp₽руб\.]+\s*$/i;
+
+    function parseLine(line) {
+        const tariffParsed = parseTariffPackageLine(line, result.tariffPackages);
+        if (tariffParsed) return tariffParsed;
+
+        if (line.includes('|')) {
+            const parts = line.split('|');
+            return { title: parts.slice(0, -1).join('|').trim(), price: parts[parts.length - 1].trim() };
+        }
+        const colonIdx = line.lastIndexOf(':');
+        if (colonIdx !== -1) {
+            const after = line.slice(colonIdx + 1).trim();
+            if (PRICE_RE.test(after)) return { title: line.slice(0, colonIdx).trim(), price: after };
+        }
+        const m = line.match(/^(.+?)\s{2,}(\d[\d\s]*[\d]\s*[РрPp₽руб\.]+)\s*$/i);
+        if (m) return { title: m[1].trim(), price: m[2].trim() };
+        return { title: line, price: null };
+    }
+
+    function buildRows(arr) {
+        return arr.map(line => {
+            const { title, price } = parseLine(line);
+            if (price) {
+                return `<tr>
+                    <td style="padding:6px 8px 6px 0;font-size:9.5pt;color:#1a1a2e;border-bottom:1px solid #ede8ff;word-break:break-word;max-width:360px;line-height:1.4;">${title}</td>
+                    <td style="padding:6px 0 6px 8px;text-align:right;font-weight:700;color:#7c3aed;font-size:9.5pt;white-space:nowrap;border-bottom:1px solid #ede8ff;vertical-align:top;">${price}</td>
+                </tr>`;
+            }
+            return `<tr>
+                <td colspan="2" style="padding:6px 0;font-size:9.5pt;color:#1a1a2e;border-bottom:1px solid #ede8ff;word-break:break-word;line-height:1.4;">${title}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    function buildSingleRow(line) {
+        const { title, price } = parseLine(line);
+        if (price) {
+            return `<tr>
+                <td style="padding:6px 8px 6px 0;font-size:9.5pt;color:#1a1a2e;border-bottom:1px solid #ede8ff;word-break:break-word;max-width:360px;line-height:1.4;">${title}</td>
+                <td style="padding:6px 0 6px 8px;text-align:right;font-weight:700;color:#7c3aed;font-size:9.5pt;white-space:nowrap;border-bottom:1px solid #ede8ff;vertical-align:top;">${price}</td>
+            </tr>`;
+        }
+        return `<tr>
+            <td colspan="2" style="padding:6px 0;font-size:9.5pt;color:#1a1a2e;border-bottom:1px solid #ede8ff;word-break:break-word;line-height:1.4;">${title}</td>
+        </tr>`;
+    }
+
+    const summaryBlock = `
+        <div style="background:#f3f0ff;border-radius:10px;padding:16px 28px;margin-top:14px;text-align:center;">
+            <div style="font-size:9.5pt;color:#6d28d9;margin-bottom:6px;">Стоимость для ${clientName}:</div>
+            <div style="font-size:20pt;font-weight:800;color:#7c3aed;letter-spacing:-0.5px;">${Helpers.fmt(result.total)} ₽</div>
+            <div style="font-size:8.5pt;color:#888;margin-top:4px;">Предложение действительно до ${State.data.validity}</div>
+        </div>`;
+
+    const contactBlock = `
+        <div style="border:1px solid #ede8ff;border-radius:10px;padding:14px 20px;margin-top:12px;display:flex;justify-content:space-between;align-items:center;">
+            <div>
+                <div style="font-size:11pt;font-weight:700;margin-bottom:4px;">
+                    <a href="https://astral.ru/contacts/" style="color:#7c3aed;text-decoration:underline;" target="_blank">Как подключиться</a>
+                </div>
+                <div style="font-size:8.5pt;color:#888;">Свяжитесь с нами, чтобы подключить сервис</div>
+            </div>
+            <div style="text-align:right;font-size:9pt;color:#1a1a2e;line-height:1.7;">
+                ${partnerName  ? `<div style="font-weight:600;">${partnerName}</div>` : ''}
+                ${partnerPhone ? `<div>${partnerPhone}</div>` : ''}
+                ${partnerEmail ? `<div>${partnerEmail}</div>` : ''}
+            </div>
+        </div>`;
+
+    const contactUrl  = 'https://astral.ru/contacts/';
+    const clientsData = [
+        { text: 'ГУП «Мосгортранс»',                                       url: 'https://1c-epd.ru/cases/pervyy-v-rossii-elektronnyy-putevoy-list-proveden-gup-mosgortrans-cherez-servis-1s-epd/' },
+        { text: 'Транспортная группа «FESCO»',                              url: 'https://1c-epd.ru/cases/kaluga-astral-i-fesco-aprobiruyut-peredachu-elektronnykh-perevozochnykh-dokumentov-v-gis-epd/' },
+        { text: 'МКП «Калининград-Гортранс»',                               url: 'https://1c-epd.ru/cases/pervyy-v-rossii-avtobus-putevoy-list-na-kotoryy-byl-podpisan-gosklyuchom-vyshel-v-reys-v-kaliningrad/' },
+        { text: 'Почта России',                                             url: 'https://1c-epd.ru/cases/pochta-rossii-perekhodit-na-elektronnye-putevye-listy/' },
+        { text: 'Разработчик программно-аппаратных комплексов «ЭСМО»',     url: 'https://1c-epd.ru/cases/esmo-i-kaluga-astral-integratsiya-dlya-elektronnykh-putevykh-listov/' },
+        { text: '«Транспорт Ярославии»',                                    url: 'https://1c-epd.ru/cases/ob-aktivnom-vnedrenii-gis-epd/' },
+    ];
+
+    const clientsBlockContent = `
+        <div style="padding:24px 44px 30px;">
+            <div style="font-size:16pt;font-weight:800;color:#7c3aed;margin-bottom:12px;">С нами работают:</div>
+            <ul style="margin:0 0 20px 18px;padding:0;list-style:disc;font-size:18pt;line-height:1.45;">
+                ${clientsData.slice(0, -1).map(c => `
+                    <li style="margin-bottom:0;">
+                        <span style="font-size:12pt;vertical-align:middle;">
+                            <a href="${c.url}" style="color:#7c3aed;text-decoration:underline;">${c.text}</a>
+                        </span>
+                    </li>`).join('')}
+                <li style="margin-bottom:0;">
+                    <span style="font-size:12pt;vertical-align:middle;">
+                        <a href="${clientsData[clientsData.length-1].url}" style="color:#7c3aed;text-decoration:underline;">${clientsData[clientsData.length-1].text}</a>
+                        <span style="color:#1a1a2e;"> и другие.</span>
+                    </span>
+                </li>
+            </ul>
+            ${contactBlock}
+        </div>`;
+
+    const projectContactBlock = `
+        <div style="padding:24px 44px 30px;">
+            <div style="font-size:16pt;font-weight:800;color:#7c3aed;margin-bottom:12px;">С нами работают:</div>
+            <ul style="margin:0 0 20px 18px;padding:0;list-style:disc;font-size:18pt;line-height:1.45;">
+                ${clientsData.slice(0, -1).map(c => `
+                    <li style="margin-bottom:0;">
+                        <span style="font-size:12pt;vertical-align:middle;">
+                            <a href="${c.url}" style="color:#7c3aed;text-decoration:underline;">${c.text}</a>
+                        </span>
+                    </li>`).join('')}
+                <li style="margin-bottom:0;">
+                    <span style="font-size:12pt;vertical-align:middle;">
+                        <a href="${clientsData[clientsData.length-1].url}" style="color:#7c3aed;text-decoration:underline;">${clientsData[clientsData.length-1].text}</a>
+                        <span style="color:#1a1a2e;"> и другие.</span>
+                    </span>
+                </li>
+            </ul>
+            ${contactBlock}
+        </div>`;
+
+    const summaryContactHTML = `
+        <div style="padding:0 44px 30px;">
+            ${summaryBlock}
+            ${contactBlock}
+        </div>`;
+
+    const contactOnlyHTML = `
+        <div style="padding:0 44px 30px;">
+            ${contactBlock}
+        </div>`;
+
+    const summaryOnlyHTML = `
+        <div style="padding:0 44px 8px;">
+            ${summaryBlock}
+        </div>`;
+
+    const tableHeaderHTML = `
+        <div style="padding:18px 44px 0;">
+            <div style="font-size:12pt;font-weight:800;color:#7c3aed;margin-bottom:10px;">Стоимость подключения:</div>
+            <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+                <colgroup><col style="width:70%"><col style="width:30%"></colgroup>
+                <tbody>`;
+    const tableFooterHTML = `</tbody></table></div>`;
+
+    async function measureHeight(htmlContent) {
+        const div = document.createElement('div');
+        div.style.cssText = 'position:absolute;top:-9999px;left:0;width:794px;background:#fff;visibility:hidden;';
+        div.innerHTML = htmlContent;
+        document.body.appendChild(div);
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const h = div.scrollHeight;
+        document.body.removeChild(div);
+        return h;
+    }
+
+    async function measureImgHeight(b64) {
+        if (!b64) return 0;
+        return new Promise(resolve => {
+            const img = new Image();
+            img.onload = () => resolve(Math.round(img.naturalHeight * (794 / img.naturalWidth)));
+            img.onerror = () => resolve(0);
+            img.src = b64;
+        });
+    }
+
+    const HEADER_H_PX = await measureImgHeight(b64Header);
+    const PAGE_H_PX   = 1122;
+    const CONTENT_MAX = PAGE_H_PX - HEADER_H_PX;
+
+    const summaryContactH = await measureHeight(summaryContactHTML);
+    const summaryOnlyH    = await measureHeight(summaryOnlyHTML);
+    const contactOnlyH    = await measureHeight(contactOnlyHTML);
+    const tableHeaderH    = await measureHeight(tableHeaderHTML + tableFooterHTML);
+
+    async function splitLines(lines, reserveBottom) {
+        const available = CONTENT_MAX - tableHeaderH - reserveBottom;
+        let accumulated = 0;
+        let splitIdx = lines.length;
+
+        for (let i = 0; i < lines.length; i++) {
+            const rowH = await measureHeight(tableHeaderHTML + buildSingleRow(lines[i]) + tableFooterHTML) - tableHeaderH;
+            accumulated += rowH;
+            if (accumulated > available) { splitIdx = i; break; }
+        }
+        return splitIdx;
+    }
+
+    let overflowMode = 'none';
+    let splitIdx = lines.length;
+
+    splitIdx = await splitLines(lines, summaryContactH);
+    if (splitIdx < lines.length) {
+        splitIdx = await splitLines(lines, summaryOnlyH);
+        if (splitIdx === lines.length) {
+            overflowMode = 'contacts';
+        } else {
+            splitIdx = await splitLines(lines, 0);
+            if (splitIdx === lines.length) {
+                overflowMode = 'summary+contacts';
+            } else {
+                overflowMode = 'rows';
+            }
+        }
+    }
+
+    const linesPage1 = overflowMode === 'rows' ? lines.slice(0, splitIdx) : lines;
+    const linesPage2 = overflowMode === 'rows' ? lines.slice(splitIdx)    : [];
+
+    const page1Bottom =
+        overflowMode === 'none'             ? summaryContactHTML :
+        overflowMode === 'contacts'         ? summaryOnlyHTML    :
+        '';
+
+    const page2Top =
+        overflowMode === 'contacts'         ? contactOnlyHTML :
+        overflowMode === 'summary+contacts' ? summaryContactHTML :
+        overflowMode === 'rows'             ? `
+            <div style="padding:0 44px 0;">
+                <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+                    <colgroup><col style="width:70%"><col style="width:30%"></colgroup>
+                    <tbody>${buildRows(linesPage2)}</tbody>
+                </table>
+            </div>
+            ${summaryContactHTML}` :
+        '';
+
+    const page1HTML = `
+        <div style="width:794px;background:#fff;box-sizing:border-box;">
+            ${b64Header ? `<img src="${b64Header}" style="width:794px;display:block;">` : ''}
+            <div style="padding:18px 44px 0;">
+                <div style="font-size:12pt;font-weight:800;color:#7c3aed;margin-bottom:10px;">Стоимость подключения:</div>
+                <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+                    <colgroup><col style="width:70%"><col style="width:30%"></colgroup>
+                    <tbody>${buildRows(linesPage1)}</tbody>
+                </table>
+            </div>
+            ${page1Bottom}
+        </div>`;
+
+    const page2HTML = `
+        <div style="width:794px;background:#fff;box-sizing:border-box;">
+            ${page2Top}
+            ${b64Middle ? `<img src="${b64Middle}" style="width:794px;display:block;">` : ''}
+            ${isTypical ? clientsBlockContent : projectContactBlock}
+        </div>`;
+
+    const page3HTML = `
+        <div style="width:794px;background:#fff;box-sizing:border-box;">
+            ${b64Footer ? `<img src="${b64Footer}" style="width:794px;display:block;">` : ''}
+        </div>`;
+
+    const PDF_W = 595.28;
+    const PDF_H = 841.89;
+
+    let page1LinkCoords = [];
+    let page2LinkCoords = [];
+
+    async function renderPageToCanvas(htmlContent, pageIndex) {
+        const div = document.createElement('div');
+        div.style.cssText = 'position:absolute;top:0;left:0;width:794px;background:#fff;z-index:99999;';
+        div.innerHTML = htmlContent;
+        document.body.appendChild(div);
+
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+        const scaleX = PDF_W / 794;
+        const scaleY = PDF_W / 794;
+        const pad    = 4;
+
+        if (pageIndex === 0) {
+            div.querySelectorAll('a[href]').forEach(el => {
+                const rect    = el.getBoundingClientRect();
+                const divRect = div.getBoundingClientRect();
+                page1LinkCoords.push({
+                    x:      (rect.left - divRect.left) * scaleX - pad,
+                    y:      (rect.top  - divRect.top)  * scaleY - pad,
+                    width:  rect.width  * scaleX + pad * 2,
+                    height: rect.height * scaleY + pad * 2,
+                    url:    el.href
+                });
+            });
+        }
+
+        if (pageIndex === 1) {
+            div.querySelectorAll('a[href]').forEach(el => {
+                const rect    = el.getBoundingClientRect();
+                const divRect = div.getBoundingClientRect();
+                page2LinkCoords.push({
+                    x:      (rect.left - divRect.left) * scaleX - pad,
+                    y:      (rect.top  - divRect.top)  * scaleY - pad,
+                    width:  rect.width  * scaleX + pad * 2,
+                    height: rect.height * scaleY + pad * 2,
+                    url:    el.href
+                });
+            });
+        }
+
+        const canvas = await html2canvas(div, {
+            scale:           3,
+            useCORS:         true,
+            allowTaint:      false,
+            backgroundColor: '#ffffff',
+            width:           794,
+            height:          div.scrollHeight,
+            windowWidth:     794
+        });
+
+        document.body.removeChild(div);
+        return canvas;
+    }
+
+    try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' });
+
+        const pages = [page1HTML, page2HTML, page3HTML];
+
+        for (let i = 0; i < pages.length; i++) {
+            const canvas  = await renderPageToCanvas(pages[i], i);
+            const imgData = canvas.toDataURL('image/jpeg', 1.0);
+            const imgH    = (canvas.height / canvas.width) * PDF_W;
+
+            if (i > 0) doc.addPage();
+            if (imgH > 0 && canvas.width > 0) {
+                doc.addImage(imgData, 'JPEG', 0, 0, PDF_W, Math.min(imgH, PDF_H));
+            }
+
+            if (i === 0) page1LinkCoords.forEach(c => doc.link(c.x, c.y, c.width, c.height, { url: c.url }));
+            if (i === 1) page2LinkCoords.forEach(c => doc.link(c.x, c.y, c.width, c.height, { url: c.url }));
+        }
+
+        doc.save(`КП Астрал.ЭПД для ${clientName}.pdf`);
+
+    } catch (err) {
+        alert(`Ошибка создания PDF: ${err.message}`);
+    }
+};
+
+window.updateServicePrice = (keyRef, value) => {
+    const num = parseFloat(value);
+    if (!isNaN(num) && num >= 0) {
+        State.data.customPrices[keyRef] = num;
+    } else {
+        delete State.data.customPrices[keyRef];
+    }
+    
+    const result = Calculator.calculateAll();
+    document.getElementById('total-price').textContent = Helpers.fmt(result.total) + ' ₽';
+    document.getElementById('details-content').innerHTML = result.lines.map(line => Helpers.escapeHtml(line)).join('<br>');
+};
+
+window.updateCustomPrice = (key, value) => {
+    const num = parseFloat(value);
+    if (!isNaN(num) && num >= 0) {
+        State.data.customPrices[key] = num;
+    } else {
+        delete State.data.customPrices[key];
+    }
+    
+    const result = Calculator.calculateAll();
+    document.getElementById('total-price').textContent = Helpers.fmt(result.total) + ' ₽';
+    document.getElementById('details-content').innerHTML = result.lines.map(line => Helpers.escapeHtml(line)).join('<br>');
+};
+
+})();
+
+
+(function() {
+'use strict';
+
+/**
+ * 1. КОНФИГУРАЦИЯ И КОНСТАНТЫ
+ */
+const CONSTANTS = {
+    TARIFFS: [
+        { id: 'minimal',   name: 'Минимальный',   minEmp: 1,    maxEmp: 299,      rangeLabel: 'от 1 до 299 сотрудников' },
+        { id: 'standard',  name: 'Стандартный',   minEmp: 300,  maxEmp: 2999,     rangeLabel: 'от 300 до 2 999 сотрудников' },
+        { id: 'corporate', name: 'Корпоративный', minEmp: 3000, maxEmp: Infinity, rangeLabel: 'от 3 000 сотрудников' },
+    ],
+    SERVICES: [
+        {
+            id: 'install_1c',
+            label: 'Установка и настройка расширения ПП Астрал iКЭДО в 1С',
+            priceKey: 'install_1c',
+            unit: 'шт.',
+            required: true,
+            layout: 'full',
+        },
+        {
+            id: 'start_work',
+            label: 'Старт работы в ПП Астрал iКЭДО',
+            priceKey: 'start_work',
+            unit: 'шт.',
+            layout: 'left',
+        },
+        {
+            id: 'roadmap',
+            label: 'Внедрение сервиса iКЭДО по дорожной карте клиента (1 час)',
+            priceKey: 'roadmap',
+            unit: 'С‡.',
+            layout: 'left',
+        },
+        {
+            id: 'onpremise',
+            label: 'Услуги по развертыванию ПП iКЭДО (on-premise)',
+            priceKey: 'onpremise',
+            unit: 'шт.',
+            layout: 'right',
+            muted: true,
+        },
+        {
+            id: 'onpremise_upd',
+            label: 'Передача файлов-обновлений ПП iКЭДО (on-premise, только для продления)',
+            priceKey: 'onpremise_upd',
+            unit: 'шт.',
+            layout: 'right',
+            muted: true,
+        },
+    ]
+};
+
+/**
+ * 2. СЛОВАРЬ ЦЕН
+ */
+const PRICES = {
+    ikedo: {
+        other:  {},
+        moscow: {},
+        extra_monthly: 0,
+        promo: 0,
+    },
+    services: {}
+};
+
+function toNum(val) {
+    if (typeof val === 'number' && Number.isFinite(val)) return val;
+    if (val === null || val === undefined) return NaN;
+    const s = val.toString().replace(/\u00A0/g, '').replace(/\s/g, '').replace(',', '.');
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : NaN;
+}
+
+const IKEDO_PANEL_ID = 'panel-ikedo';
+
+function getIkedoRoot() {
+    return document.getElementById(IKEDO_PANEL_ID);
+}
+
+function getIkedoElement(id) {
+    const variants = [id, `${id}-ikedo`];
+    const root = getIkedoRoot();
+
+    if (root) {
+        for (const variant of variants) {
+            const fromRoot = root.querySelector(`#${variant}`);
+            if (fromRoot) return fromRoot;
+        }
+    }
+
+    for (const variant of variants) {
+        const globalEl = document.getElementById(variant);
+        if (globalEl) return globalEl;
+    }
+
+    return null;
+}
+
+function isIkedoScopeTarget(target) {
+    const root = getIkedoRoot();
+    return !root || root.contains(target);
+}
+
+function parsePricesFromJSON(json) {
+    const rows = json['iКЭДО'];
+    if (!rows) return;
+
+    let section = null;
+    const otherRows  = [];
+    const moscowRows = [];
+
+    rows.forEach(row => {
+        if (!row) return;
+        const sectionMarker = parseInt(row['Column1']);
+        if (sectionMarker === 1) { section = 1; return; }
+        if (sectionMarker === 2) { section = 2; return; }
+        if (sectionMarker === 3) { section = 3; return; }
+        if (sectionMarker === 4) { section = 4; return; }
+
+        const price = toNum(row['Column4']);
+
+        if (section === 1 && Number.isFinite(price)) otherRows.push(price);
+        if (section === 2 && Number.isFinite(price)) moscowRows.push(price);
+        if (section === 3 && Number.isFinite(price)) PRICES.ikedo.extra_monthly = price;
+        if (section === 4 && Number.isFinite(price)) PRICES.ikedo.promo = price;
+
+        const svcName  = row['Column9'];
+        const svcPrice = toNum(row['Column10']);
+        if (svcName && Number.isFinite(svcPrice)) mapServicePrice(svcName, svcPrice);
+    });
+
+    const keyMap = ['minimal_12','minimal_24','standard_12','standard_24','corporate_12','corporate_24'];
+    otherRows.forEach((p, i)  => { if (keyMap[i]) PRICES.ikedo.other[keyMap[i]]  = p; });
+    moscowRows.forEach((p, i) => { if (keyMap[i]) PRICES.ikedo.moscow[keyMap[i]] = p; });
+}
+
+function mapServicePrice(name, price) {
+    const n = name.trim();
+    if      (n.includes('Установка и настройка расширения'))  PRICES.services.install_1c    = price;
+    else if (n.includes('Старт работы'))                      PRICES.services.start_work    = price;
+    else if (n.includes('дорожной карте'))                    PRICES.services.roadmap       = price;
+    else if (n.includes('развертыванию') || (n.includes('on-premise') && !n.includes('обновлений')))
+                                                              PRICES.services.onpremise     = price;
+    else if (n.includes('обновлений'))                        PRICES.services.onpremise_upd = price;
+}
+
+PRICES.get = function(region, tariffId, term) {
+    return this.ikedo[region]?.[`${tariffId}_${term}`] ?? 0;
+};
+
+/**
+ * 3. СОСТОЯНИЕ
+ */
+const State = {
+    data: {
+        subMode:       'standard',   // 'standard' | 'individual'
+        region:        'moscow',
+        employees:     0,
+        tariffType:    'main',       // 'main' | 'monthly' | 'individual'
+        term:          12,
+        monthlyMonths: 1,            // 1?11
+        services:      {},
+        customPrices:  {},           // индивидуальные цены: { key: number }
+        individualPrice: null,       // цена за сотрудника в индивидуальном тарифе
+    },
+
+    initServices() {
+        CONSTANTS.SERVICES.forEach(s => {
+            // Обязательные услуги — включены по умолчанию со значением 1
+            this.data.services[s.id] = s.required ? 1 : 0;
+        });
+    },
+
+    getTariff(employees) {
+        if (!employees || employees <= 0) return null;
+        return CONSTANTS.TARIFFS.find(t => employees >= t.minEmp && employees <= t.maxEmp) || null;
+    },
+};
+
+/**
+ * 4. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+ */
+const Helpers = {
+    fmt: (num) => Math.round(num).toLocaleString('ru-RU'),
+    regionLabel: (region) => region === 'moscow' ? 'Москва и Московская область' : 'Другие регионы',
+    parseNum: (val) => {
+        if (val === undefined || val === null) return 0;
+        return parseFloat(val.toString().replace(',', '.')) || 0;
+    },
+};
+
+/**
+ * 5. ЛОГИКА РАСЧЁТА
+ */
+const Calculator = {
+    getPerEmpPrice(tariffId, region, term) {
+        const baseKey = `${tariffId}_${region}_${term}`;
+        const custom  = State.data.customPrices[baseKey];
+        if (State.data.subMode === 'individual' && custom !== undefined) return custom;
+        return PRICES.get(region, tariffId, term);
+    },
+
+    getMonthlyPrice() {
+        const custom = State.data.customPrices['extra_monthly'];
+        if (State.data.subMode === 'individual' && custom !== undefined) return custom;
+        return PRICES.ikedo.extra_monthly;
+    },
+
+    getServicePrice(priceKey) {
+        const custom = State.data.customPrices[`svc_${priceKey}`];
+        if (State.data.subMode === 'individual' && custom !== undefined) return custom;
+        return PRICES.services[priceKey] || 0;
+    },
+
+    calculateAll() {
+        const { employees, region, term, tariffType, monthlyMonths, services } = State.data;
+        const tariff = State.getTariff(employees);
+        let lines = [], total = 0, meta = null;
+
+        // ── Тариф ──
+        if (employees > 0) {
+            if (tariffType === 'individual') {
+                const perEmp = State.data.individualPrice !== null ? State.data.individualPrice : 0;
+                const totalYear = employees * perEmp;
+                total += totalYear;
+                lines.push(`Индивидуальный тариф: ${Helpers.fmt(employees)} сотр. × ${Helpers.fmt(perEmp)} ₽ = ${Helpers.fmt(totalYear)} ₽`);
+                meta = { type: 'individual', employees, perEmp, totalYear, totalMonth: Math.round(totalYear / 12), regionLabel: Helpers.regionLabel(region) };
+
+            } else if (tariffType === 'monthly') {
+                const months       = Math.min(Math.max(monthlyMonths, 1), 11);
+                const perEmp       = this.getMonthlyPrice();
+                const costPerMonth = employees * perEmp;
+                const costTotal    = costPerMonth * months;
+                total += costTotal;
+                lines.push(`Помесячный тариф: ${employees} сотр. × ${Helpers.fmt(perEmp)} ₽ × ${months} мес. = ${Helpers.fmt(costTotal)} ₽`);
+                meta = { type: 'monthly', employees, perEmp, costPerMonth, costTotal, months, regionLabel: Helpers.regionLabel(region) };
+
+            } else if (tariff) {
+                const perEmp    = this.getPerEmpPrice(tariff.id, region, term);
+                const totalYear = employees * perEmp;
+                total += totalYear;
+                const termLabel = term === 24 ? 'на 2 года' : 'на 1 год';
+                lines.push(`Тариф: ${tariff.name} | на ${Helpers.fmt(employees)} сотрудников (${termLabel}): ${Helpers.fmt(totalYear)} ₽`);
+                meta = { type: 'main', tariff, perEmp, totalYear, totalMonth: Math.round(totalYear / 12), employees, region, term, regionLabel: Helpers.regionLabel(region) };
+            }
+        }
+
+        // ── Услуги ──
+        CONSTANTS.SERVICES.forEach(svc => {
+            const qty = services[svc.id] || 0;
+            if (qty > 0) {
+                const price = this.getServicePrice(svc.priceKey);
+                const sum   = price * qty;
+                total += sum;
+                lines.push(`${svc.label} × ${qty}: ${Helpers.fmt(sum)} ₽`);
+            }
+        });
+
+        return { total, lines, meta };
+    }
+};
+
+/**
+ * 6. ОТРИСОВКА (UI)
+ */
+const UI = {
+    els: {},
+
+    init() {
+        this.renderServicesHTML();
+        this.cacheElements();
+        this.bindEvents();
+    },
+
+    cacheElements() {
+        ['dynamic-content','total-price','details-content','employees-count']
+            .forEach(id => this.els[id] = getIkedoElement(id));
+    },
+
+    // ── Рендер карточек сервисных услуг ──
+    renderServicesHTML() {
+        const container = getIkedoElement('services-container');
+        if (!container) return;
+        const isInd = State.data.subMode === 'individual';
+
+        // Разбиваем на группы по layout
+        const fullSvcs  = CONSTANTS.SERVICES.filter(s => s.layout === 'full');
+        const leftSvcs  = CONSTANTS.SERVICES.filter(s => s.layout === 'left');
+        const rightSvcs = CONSTANTS.SERVICES.filter(s => s.layout === 'right');
+
+        const renderCard = (svc) => {
+            const isActive = State.data.services[svc.id] > 0;
+            const qty = State.data.services[svc.id] || 1;
+            const isRequired = svc.required === true;
+            const isMuted = svc.muted === true;
+
+            const customPriceBlock = isInd ? `
+                <details class="card-price-details" style="margin-top: 12px; border-top: 1px solid #eee; padding-top: 10px;">
+                    <summary class="custom-price-summary">Изменить стоимость</summary>
+                    <div class="custom-price-content">
+                        <div class="custom-price-row">
+                            <span>Цена за единицу</span>
+                            <input type="number" min="0"
+                                value="${State.data.customPrices[`svc_${svc.priceKey}`] ?? ''}"
+                                placeholder="${PRICES.services[svc.priceKey] || 0}"
+                                class="custom-price-input"
+                                onkeydown="if(['-','e','E',',','.'].includes(event.key)) event.preventDefault();"
+                                oninput="window.updateSvcCustomPrice('${svc.priceKey}', this.value)">
+                        </div>
+                    </div>
+                </details>` : '';
+
+            const switchOrBadge = isRequired
+                ? `<span class="required-badge">Обязательно</span>`
+                : `<label class="custom-switch">
+                    <input type="checkbox" data-action="toggle-svc" data-id="${svc.id}" ${isActive ? 'checked' : ''}>
+                    <span class="slider"></span>
+                   </label>`;
+
+            return `
+            <div class="addon-card ${isActive ? 'active' : ''} ${isMuted ? 'addon-card--muted' : ''}" id="svc-card-${svc.id}">
+                <div class="addon-header">
+                    <span class="addon-title ${isMuted ? 'addon-title--muted' : ''}">${svc.label}</span>
+                    ${switchOrBadge}
+                </div>
+                <div id="svc-body-${svc.id}" style="display:${isActive ? 'block' : 'none'}; margin-top:10px;">
+                    <div class="variant-row">
+                        <span class="v-label">Количество (${svc.unit})</span>
+                        <div class="v-controls">
+                            <input type="number" class="qty-input" min="1" value="${qty}"
+                                data-action="svc-qty" data-id="${svc.id}"
+                                ${isRequired ? '' : ''}>
+                        </div>
+                    </div>
+                    <div id="svc-hint-${svc.id}" style="font-size:12px; color:#888; margin-top:6px; text-align:right;"></div>
+                    ${customPriceBlock}
+                </div>
+            </div>`;
+        };
+
+        // Формируем HTML с нужной раскладкой
+        let html = '';
+
+        // Полная строка
+        fullSvcs.forEach(svc => {
+            html += `<div style="grid-column: 1 / -1;">${renderCard(svc)}</div>`;
+        });
+
+        // Левая и правая колонки
+        const maxRows = Math.max(leftSvcs.length, rightSvcs.length);
+        if (maxRows > 0) {
+            for (let i = 0; i < maxRows; i++) {
+                if (leftSvcs[i])  html += renderCard(leftSvcs[i]);
+                else              html += `<div></div>`;
+                if (rightSvcs[i]) html += renderCard(rightSvcs[i]);
+                else              html += `<div></div>`;
+            }
+        }
+
+        container.innerHTML = html;
+        this.updateServiceHints();
+    },
+
+    update() {
+        const result = Calculator.calculateAll();
+        const totalEl = this.els['total-price'] || getIkedoElement('total-price');
+        const detailsEl = this.els['details-content'] || getIkedoElement('details-content');
+        if (totalEl) totalEl.textContent = Helpers.fmt(result.total) + ' ₽';
+        if (detailsEl) {
+            detailsEl.innerHTML = result.lines.length
+            ? result.lines.join('<br>')
+            : 'Введите данные для расчета...';
+        }
+        this.renderTariffCard(result.meta);
+        this.updateServiceHints();
+    },
+
+    updateServiceHints() {
+        CONSTANTS.SERVICES.forEach(svc => {
+            const hint = getIkedoElement(`svc-hint-${svc.id}`);
+            if (!hint) return;
+            const price = Calculator.getServicePrice(svc.priceKey);
+            const qty   = State.data.services[svc.id] || 0;
+            hint.textContent = (price > 0 && qty > 0)
+                ? `${Helpers.fmt(price)} ₽ × ${qty} = ${Helpers.fmt(price * qty)} ₽`
+                : '';
+        });
+    },
+
+    // ── Рендер карточки тарифа ──
+    renderTariffCard(meta) {
+        const container = this.els['dynamic-content'] || getIkedoElement('dynamic-content');
+        if (!container) return;
+        if (!meta) {
+            container.innerHTML = `<div class="placeholder-text">Здесь будут параметры тарифа...<br><strong>Введите количество сотрудников</strong></div>`;
+            return;
+        }
+
+        const isInd = State.data.subMode === 'individual';
+        let bodyHTML = '';
+
+        if (meta.type === 'individual') {
+            bodyHTML = `
+                <div class="detail-row"><span>Регион</span><strong>${meta.regionLabel}</strong></div>
+                <div class="detail-row"><span>Количество сотрудников</span><strong>${Helpers.fmt(meta.employees)} чел.</strong></div>
+                <div class="detail-row">
+                    <span>Цена за 1 сотрудника</span>
+                    <div class="price-edit-block">
+                        <input type="number" class="tariff-field-input" min="0"
+                            value="${State.data.individualPrice ?? ''}"
+                            placeholder="Введите цену"
+                            data-action="individual-price">
+                        <span class="unit-text">₽</span>
+                    </div>
+                </div>
+                <div class="detail-row highlight"><span>Итого в месяц</span><strong>${Helpers.fmt(meta.totalMonth)} ₽</strong></div>
+                <div class="detail-row highlight"><span>Итого за год</span><strong>${Helpers.fmt(meta.totalYear)} ₽</strong></div>`;
+
+        } else if (meta.type === 'monthly') {
+            const priceBlock = isInd
+                ? `<div class="price-edit-block">
+                    <input type="number" class="tariff-field-input" min="0"
+                        value="${State.data.customPrices['extra_monthly'] ?? meta.perEmp}"
+                        data-action="custom-price" data-key="extra_monthly">
+                    <span class="unit-text">₽</span>
+                   </div>`
+                : `<strong>${Helpers.fmt(meta.perEmp)} ₽</strong>`;
+
+            bodyHTML = `
+                <div class="detail-row"><span>Регион</span><strong>${meta.regionLabel}</strong></div>
+                <div class="detail-row"><span>Количество сотрудников</span><strong>${Helpers.fmt(meta.employees)} чел.</strong></div>
+                <div class="detail-row">
+                    <span>Цена за 1 сотрудника/мес.</span>
+                    ${priceBlock}
+                </div>
+                <div class="detail-row"><span>Стоимость в месяц</span><strong>${Helpers.fmt(meta.costPerMonth)} ₽</strong></div>
+                <div class="detail-row highlight"><span>Срок</span><strong>${meta.months} мес.</strong></div>
+                <div class="detail-row highlight"><span>Итого</span><strong>${Helpers.fmt(meta.costTotal)} ₽</strong></div>`;
+
+        } else {
+            const t = meta.tariff;
+            const customKey = `${t.id}_${meta.region}_${meta.term}`;
+            const priceBlock = isInd
+                ? `<div class="price-edit-block">
+                    <input type="number" class="tariff-field-input" min="0"
+                        value="${State.data.customPrices[customKey] ?? meta.perEmp}"
+                        data-action="custom-price" data-key="${customKey}">
+                    <span class="unit-text">₽</span>
+                   </div>`
+                : `<strong>${Helpers.fmt(meta.perEmp)} ₽</strong>`;
+
+            bodyHTML = `
+                <div class="detail-row"><span>Регион</span><strong>${meta.regionLabel}</strong></div>
+                <div class="detail-row"><span>Количество сотрудников</span><strong>${Helpers.fmt(meta.employees)} чел.</strong></div>
+                <div class="detail-row"><span>Срок</span><strong>${meta.term} месяцев</strong></div>
+                <div class="detail-row">
+                    <span>Цена за 1 сотрудника</span>
+                    ${priceBlock}
+                </div>
+                <div class="detail-row highlight"><span>Итого в месяц</span><strong>${Helpers.fmt(meta.totalMonth)} ₽</strong></div>
+                <div class="detail-row highlight"><span>Итого за период</span><strong>${Helpers.fmt(meta.totalYear)} ₽</strong></div>`;
+        }
+
+        const labelText = meta.type === 'individual' ? 'Индивидуальный'
+                        : meta.type === 'monthly'    ? 'Помесячный'
+                        : meta.tariff.name;
+        const titleText = meta.type === 'individual' ? `${Helpers.fmt(meta.employees)} сотрудников`
+                        : meta.type === 'monthly'    ? `${meta.months} ${meta.months === 1 ? 'месяц' : meta.months < 5 ? 'месяца' : 'месяцев'}`
+                        : meta.tariff.rangeLabel;
+
+        const indClass = State.data.subMode === 'individual' ? ' individual-mode' : '';
+
+        container.innerHTML = `
+            <div class="tariff-card animated-fade${indClass}">
+                <div class="tariff-header">
+                    <span class="tariff-label">${labelText}</span>
+                    <h3 class="tariff-title">${titleText}</h3>
+                </div>
+                <div class="detailing-section">${bodyHTML}</div>
+            </div>`;
+    },
+
+    // ── Показать/скрыть блоки в зависимости от типа тарифа ──
+    updateTariffTypeUI() {
+        const type = State.data.tariffType;
+        const termRow              = getIkedoElement('term-row');
+        const monthlyMonthsRow     = getIkedoElement('monthly-months-row');
+
+        if (termRow)          termRow.style.display          = (type === 'main')    ? 'block' : 'none';
+        if (monthlyMonthsRow) monthlyMonthsRow.style.display = (type === 'monthly') ? 'block' : 'none';
+    },
+
+    bindEvents() {
+        document.body.addEventListener('click',  e => this.handleClick(e));
+        document.body.addEventListener('input',  e => this.handleInput(e));
+        document.body.addEventListener('change', e => this.handleChange(e));
+    },
+
+    handleClick(e) {
+        if (!isIkedoScopeTarget(e.target)) return;
+        const btn = e.target.closest('[data-click]');
+        if (!btn) return;
+        const act = btn.dataset.click;
+
+        if (act === 'set-submode') {
+            btn.closest('.toggle-group').querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            State.data.subMode = btn.dataset.val;
+            if (State.data.subMode === 'standard') {
+                State.data.customPrices = {};
+            }
+            this.renderServicesHTML();
+            this.update();
+        }
+        else if (act === 'set-region') {
+            btn.closest('.toggle-group').querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            State.data.region = btn.dataset.val;
+            this.update();
+        }
+        else if (act === 'set-term') {
+            btn.closest('.toggle-group').querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            State.data.term = parseInt(btn.dataset.val);
+            this.update();
+        }
+        else if (act === 'set-tariff-type') {
+            btn.closest('.toggle-group').querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            State.data.tariffType = btn.dataset.val;
+            this.updateTariffTypeUI();
+            this.update();
+        }
+    },
+
+    handleInput(e) {
+        if (!isIkedoScopeTarget(e.target)) return;
+        const t = e.target, act = t.dataset.action, val = t.value;
+
+        if (act === 'employees') {
+            State.data.employees = parseInt(val) || 0;
+            this.update();
+        }
+        else if (act === 'monthly-months') {
+            State.data.monthlyMonths = Math.min(Math.max(parseInt(val) || 1, 1), 11);
+            this.update();
+        }
+        else if (act === 'svc-qty') {
+            State.data.services[t.dataset.id] = Math.max(1, parseInt(val) || 1);
+            this.update();
+        }
+        else if (act === 'custom-price') {
+            const key = t.dataset.key;
+            const num = Helpers.parseNum(t.value);
+            if (!isNaN(num) && num >= 0) {
+                State.data.customPrices[key] = num;
+            } else {
+                delete State.data.customPrices[key];
+            }
+            const result = Calculator.calculateAll();
+            this.els['total-price'].textContent = Helpers.fmt(result.total) + ' ₽';
+            this.els['details-content'].innerHTML = result.lines.length
+                ? result.lines.join('<br>')
+                : 'Введите данные для расчета...';
+            this.updateServiceHints();
+        }
+    },
+
+    handleChange(e) {
+        if (!isIkedoScopeTarget(e.target)) return;
+        const t = e.target, act = t.dataset.action;
+
+        if (act === 'individual-price') {
+            const num = Helpers.parseNum(t.value);
+            State.data.individualPrice = (!isNaN(num) && num >= 0) ? num : null;
+            this.update();
+        }
+        else if (act === 'toggle-svc') {
+            const id      = t.dataset.id;
+            const checked = t.checked;
+            const svcBody = getIkedoElement(`svc-body-${id}`);
+            const svcCard = getIkedoElement(`svc-card-${id}`);
+            if (svcBody) svcBody.style.display = checked ? 'block' : 'none';
+            if (svcCard) svcCard.classList.toggle('active', checked);
+            State.data.services[id] = checked ? (State.data.services[id] || 1) : 0;
+            this.update();
+        }
+    }
+};
+
+/**
+ * 7. ИНИЦИАЛИЗАЦИЯ
+ */
+let __ikedoBootstrapped = false;
+async function bootstrapIkedo() {
+    if (__ikedoBootstrapped) return;
+    __ikedoBootstrapped = true;
+
+    State.initServices();
+    UI.init();
+    UI.updateTariffTypeUI();
+
+    const getScriptBaseUrl = () => {
+        const script = Array.from(document.scripts).find(s =>
+            /(?:ikedo-calc-script|app)\.js(?:$|\?)/i.test(s.src || '')
+        );
+        if (!script || !script.src) return null;
+        try {
+            return new URL('.', script.src);
+        } catch {
+            return null;
+        }
+    };
+
+    const getTariffFileCandidates = () => {
+        const globalPriceNames =
+            window.__CALC_APP_RESOURCES &&
+            window.__CALC_APP_RESOURCES.prices &&
+            window.__CALC_APP_RESOURCES.prices.ikedo;
+        const names = Array.isArray(globalPriceNames) && globalPriceNames.length
+            ? globalPriceNames
+            : ['iKedo-tafiffs.json'];
+        const urls = [];
+
+        names.forEach(name => {
+            urls.push(name);
+            urls.push(`./${name}`);
+            urls.push(encodeURI(name));
+            urls.push(`./${encodeURI(name)}`);
+        });
+
+        const scriptBase = getScriptBaseUrl();
+        if (scriptBase) {
+            names.forEach(name => {
+                urls.push(new URL(name, scriptBase).href);
+                urls.push(new URL(encodeURI(name), scriptBase).href);
+            });
+        }
+
+        return [...new Set(urls)];
+    };
+
+    let loaded = false;
+
+    try {
+        if (window.__CALC_PRELOAD_PRICES_PROMISE) {
+            await window.__CALC_PRELOAD_PRICES_PROMISE;
+        }
+    } catch {}
+
+    const preloaded = window.__CALC_PRELOADED_DATA && window.__CALC_PRELOADED_DATA.ikedo;
+    const hasIkedoSection =
+        preloaded &&
+        typeof preloaded === 'object' &&
+        !Array.isArray(preloaded) &&
+        Array.isArray(preloaded['iКЭДО']);
+    if (hasIkedoSection) {
+        parsePricesFromJSON(preloaded);
+        loaded = true;
+    } else {
+        const candidates = getTariffFileCandidates();
+        for (const url of candidates) {
+            try {
+                const res = await fetch(url, { cache: 'no-store' });
+                if (!res.ok) continue;
+                const json = await res.json();
+                parsePricesFromJSON(json);
+                loaded = true;
+                break;
+            } catch (e) {
+            }
+        }
+    }
+
+    UI.update();
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrapIkedo);
+} else {
+    bootstrapIkedo();
+}
+
+/**
+ * Глобальные функции для кастомных цен сервисов
+ */
+window.updateSvcCustomPrice = (priceKey, value) => {
+    const num = parseFloat(value);
+    if (!isNaN(num) && num >= 0) {
+        State.data.customPrices[`svc_${priceKey}`] = num;
+    } else {
+        delete State.data.customPrices[`svc_${priceKey}`];
+    }
+    const result = Calculator.calculateAll();
+    const totalEl = getIkedoElement('total-price');
+    const detailsEl = getIkedoElement('details-content');
+    if (totalEl) totalEl.textContent = Helpers.fmt(result.total) + ' ₽';
+    if (detailsEl) {
+        detailsEl.innerHTML = result.lines.length
+            ? result.lines.join('<br>')
+            : 'Введите данные для расчета...';
+    }
+    UI.updateServiceHints();
+};
+
+/**
+ * 8. ГЕНЕРАЦИЯ PDF (КП)
+ */
+window.downloadKPIKEDO = async function() {
+    const result = Calculator.calculateAll();
+    if (!result.meta && result.total === 0) {
+        alert('Сначала сделайте расчёт!');
+        return;
+    }
+
+    const partnerName  = getIkedoElement('partner-name')?.value.trim()  || '';
+    const partnerPhone = getIkedoElement('partner-phone')?.value.trim() || '';
+    const partnerEmail = getIkedoElement('partner-email')?.value.trim() || '';
+    const clientName   = getIkedoElement('client-name')?.value.trim()   || 'Клиент';
+
+    async function toBase64(url) {
+        try {
+            const res = await fetch(url);
+            if (!res.ok) return '';
+            const blob = await res.blob();
+            return new Promise((resolve, reject) => {
+                const r = new FileReader();
+                r.onload  = () => resolve(r.result);
+                r.onerror = reject;
+                r.readAsDataURL(blob);
+            });
+        } catch { return ''; }
+    }
+
+    const [b64Header, b64Footer1, b64Footer2] = await Promise.all([
+        toBase64('iKedo-pdf-header.jpg'),
+        toBase64('iKedo-pdf-footer-1.jpg'),
+        toBase64('iKedo-pdf-footer-2.jpg'),
+    ]);
+
+    function parseLines(lines, meta) {
+        const rows = [];
+        lines.forEach(line => {
+            if (line.startsWith('Тариф:') || line.startsWith('Помесячный') || line.startsWith('Индивидуальный тариф')) {
+                if (meta && meta.type === 'main') {
+                    const termLabel = meta.term === 24 ? 'на 2 года' : 'на 1 год';
+                    rows.push({
+                        name:  `Лицензия для 1 сотрудника ${termLabel}`,
+                        rate:  `${Helpers.fmt(meta.perEmp)} ₽`,
+                        qty:   meta.employees,
+                        total: `${Helpers.fmt(meta.totalYear)} ₽`,
+                    });
+                } else if (meta && meta.type === 'monthly') {
+                    rows.push({
+                        name:  `Помесячная лицензия (${meta.months} мес.)`,
+                        rate:  `${Helpers.fmt(meta.perEmp)} ₽/мес.`,
+                        qty:   meta.employees,
+                        total: `${Helpers.fmt(meta.costTotal)} ₽`,
+                    });
+                } else if (meta && meta.type === 'individual') {
+                    rows.push({
+                        name:  'Индивидуальная лицензия',
+                        rate:  `${Helpers.fmt(meta.perEmp)} ₽`,
+                        qty:   meta.employees,
+                        total: `${Helpers.fmt(meta.totalYear)} ₽`,
+                    });
+                }
+                return;
+            }
+            const crossMatch = line.match(/^(.+?)\s*×\s*(\d+):\s*(.+)$/);
+            if (crossMatch) {
+                const name = crossMatch[1].trim();
+                const qty  = parseInt(crossMatch[2]);
+                const total = crossMatch[3].trim();
+                const svc = CONSTANTS.SERVICES.find(s => name.includes(s.label) || s.label.includes(name.slice(0,20)));
+                const unitPrice = svc ? Calculator.getServicePrice(svc.priceKey) : 0;
+                rows.push({ name, rate: unitPrice > 0 ? `${Helpers.fmt(unitPrice)} ₽` : '—', qty, total });
+            }
+        });
+        return rows;
+    }
+
+    const tableRows = parseLines(result.lines, result.meta);
+
+    function buildTable(rows, clientName, total) {
+        const PRIMARY  = '#7756ff';
+        const ROW_EVEN = '#ffffff';
+        const ROW_ODD  = '#faf8fc';
+        const BORDER   = '#ede8ff';
+
+        const dataRows = rows.map((row, i) => `
+            <tr style="background:${i % 2 === 0 ? ROW_EVEN : ROW_ODD};">
+                <td style="padding:13px 20px;font-size:9.5pt;color:#1a1a2e;border-bottom:1px solid ${BORDER};line-height:1.4;width:44%;">${row.name}</td>
+                <td style="padding:13px 16px;font-size:9.5pt;color:#1a1a2e;border-bottom:1px solid ${BORDER};text-align:center;width:18%;">${row.rate}</td>
+                <td style="padding:13px 16px;font-size:9.5pt;color:#1a1a2e;border-bottom:1px solid ${BORDER};text-align:center;width:18%;">${row.qty}</td>
+                <td style="padding:13px 20px;font-size:9.5pt;font-weight:700;color:#1a1a2e;border-bottom:1px solid ${BORDER};text-align:right;width:20%;">${row.total}</td>
+            </tr>`).join('');
+
+        return `
+            <div style="margin-top:16px;">
+                <div style="font-size:17pt;font-weight:800;color:${PRIMARY};margin-bottom:18px;font-family:Montserrat,Arial,sans-serif;">
+                    Расчёт для компании «${clientName}»
+                </div>
+                <table style="width:100%;border-collapse:separate;border-spacing:0;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(124,57,191,0.08);">
+                    <thead>
+                        <tr style="background:${PRIMARY};">
+                            <th style="padding:14px 20px;text-align:left;color:#fff;font-size:9.5pt;font-weight:700;border-radius:14px 0 0 0;">Наименование</th>
+                            <th style="padding:14px 16px;text-align:center;color:#fff;font-size:9.5pt;font-weight:700;">Тариф</th>
+                            <th style="padding:14px 16px;text-align:center;color:#fff;font-size:9.5pt;font-weight:700;">Количество</th>
+                            <th style="padding:14px 20px;text-align:right;color:#fff;font-size:9.5pt;font-weight:700;border-radius:0 14px 0 0;">Общая сумма</th>
+                        </tr>
+                    </thead>
+                    <tbody>${dataRows}</tbody>
+                    <tfoot>
+                        <tr style="background:${PRIMARY};">
+                            <td colspan="3" style="padding:14px 20px;color:#fff;font-size:10pt;font-weight:700;border-radius:0 0 0 14px;">Итого</td>
+                            <td style="padding:14px 20px;color:#fff;font-size:11pt;font-weight:800;text-align:right;border-radius:0 0 14px 0;">${Helpers.fmt(total)} ₽</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>`;
+    }
+
+    function buildContacts(name, phone, email) {
+        if (!name && !phone && !email) return '';
+        return `
+            <div style="margin-top:24px;border:1.5px solid #ede8ff;border-radius:14px;padding:16px 24px;display:flex;justify-content:space-between;align-items:center;background:#faf8fc;">
+                <div>
+                    <div style="font-size:10pt;font-weight:700;color:#7C39BF;margin-bottom:4px;">Остались вопросы? Свяжитесь с нами</div>
+                    <div style="font-size:8.5pt;color:#888;">Готовы помочь с подключением сервиса</div>
+                </div>
+                <div style="text-align:right;font-size:9pt;color:#1a1a2e;line-height:1.8;">
+                    ${name  ? `<div style="font-weight:700;">${name}</div>`  : ''}
+                    ${phone ? `<div>${phone}</div>` : ''}
+                    ${email ? `<div>${email}</div>` : ''}
+                </div>
+            </div>`;
+    }
+
+    const page1HTML = `
+        <div style="width:794px;background:#fff;box-sizing:border-box;">
+            ${b64Header ? `<img src="${b64Header}" style="width:794px;display:block;">` : ''}
+        </div>`;
+
+    async function measureHeight(htmlContent) {
+        const div = document.createElement('div');
+        div.style.cssText = 'position:absolute;top:-9999px;left:0;width:794px;background:#fff;visibility:hidden;';
+        div.innerHTML = htmlContent;
+        document.body.appendChild(div);
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const h = div.scrollHeight;
+        document.body.removeChild(div);
+        return h;
+    }
+
+    async function renderPage(htmlContent) {
+        const div = document.createElement('div');
+        div.style.cssText = 'position:fixed;top:0;left:-9999px;width:794px;background:#fff;z-index:-1;pointer-events:none;';
+        div.innerHTML = htmlContent;
+        document.body.appendChild(div);
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const canvas = await html2canvas(div, {
+            scale: 2.5, useCORS: true, allowTaint: false,
+            backgroundColor: '#ffffff', width: 794, height: div.scrollHeight, windowWidth: 794
+        });
+        document.body.removeChild(div);
+        return canvas;
+    }
+
+    const A4_PX = 1123;
+
+    const page2ContentHTML = `
+        <div style="width:794px;background:#fff;box-sizing:border-box;font-family:Montserrat,Arial,sans-serif;">
+            ${b64Footer1 ? `<img src="${b64Footer1}" style="width:794px;display:block;">` : ''}
+            <div style="padding:18px 44px 40px;">
+                ${buildTable(tableRows, clientName, result.total)}
+                ${buildContacts(partnerName, partnerPhone, partnerEmail)}
+            </div>
+        </div>`;
+
+    const footer2Block = b64Footer2
+        ? `<div style="width:794px;"><img src="${b64Footer2}" style="width:794px;height:210px;display:block;"></div>`
+        : '';
+
+    const page2WithFooter2HTML = `
+        <div style="width:794px;background:#fff;box-sizing:border-box;font-family:Montserrat,Arial,sans-serif;">
+            ${b64Footer1 ? `<img src="${b64Footer1}" style="width:794px;display:block;">` : ''}
+            <div style="padding:18px 44px 24px;">
+                ${buildTable(tableRows, clientName, result.total)}
+                ${buildContacts(partnerName, partnerPhone, partnerEmail)}
+            </div>
+            ${footer2Block}
+        </div>`;
+
+    const combinedHeight = await measureHeight(page2WithFooter2HTML);
+    const useCombined = combinedHeight <= A4_PX;
+
+    try {
+        const { jsPDF } = window.jspdf;
+        const PDF_W = 595.28, PDF_H = 841.89;
+        const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' });
+
+        const c1 = await renderPage(page1HTML);
+        doc.addImage(c1.toDataURL('image/jpeg', 1.00), 'JPEG', 0, 0, PDF_W, Math.min((c1.height/c1.width)*PDF_W, PDF_H));
+
+        doc.addPage();
+        const p2html = useCombined ? page2WithFooter2HTML : page2ContentHTML;
+        const c2 = await renderPage(p2html);
+        doc.addImage(c2.toDataURL('image/jpeg', 1.00), 'JPEG', 0, 0, PDF_W, Math.min((c2.height/c2.width)*PDF_W, PDF_H));
+
+        if (!useCombined && b64Footer2) {
+            doc.addPage();
+            const c3 = await renderPage(`<div style="width:794px;background:#fff;box-sizing:border-box;">
+                <img src="${b64Footer2}" style="width:794px;display:block;">
+            </div>`);
+            doc.addImage(c3.toDataURL('image/jpeg', 1.00), 'JPEG', 0, 0, PDF_W, Math.min((c3.height/c3.width)*PDF_W, PDF_H));
+        }
+
+        doc.save(`КП Астрал.iКЭДО — ${clientName}.pdf`);
+    } catch (err) {
+        console.error('Ошибка PDF:', err);
+        alert(`Ошибка создания PDF: ${err.message}`);
+    }
+};
+
+})();
+
+
+/**
+ * Калькулятор Астрал.ОФД (АО5)
+ */
+(function () {
+'use strict';
+
+// ── Маппинг колонок JSON ──────────────────────────────────────────────────
+const TARIFF_MAP = {
+  'zero':     { ip: 'Zero\n(Нулевка)',                      ul: 'Zero\n(Нулевка)'                    },
+  'uno':      { ip: 'Uno(Минимальный)',                     ul: 'Column5'                      },
+  'tre_s':    { ip: 'Tre S(Упрощенный)',                    ul: 'Column7'                      },
+  'tre_o':    { ip: null,                                   ul: 'Tre O(Базовый) \n25/26'       },
+  'opt3':     { ip: 'Quattro(Оптимальный)3 мес',            ul: 'Column14'                     },
+  'opt6':     { ip: 'Quattro(Оптимальный) 6 мес',           ul: 'Column16'                     },
+  'opt12':    { ip: 'Quattro(Оптимальный)\n 12 мес',        ul: 'Column10'                     },
+  'opt24':    { ip: 'Quattro 2(Оптимальный 2) \n24 мес',    ul: 'Column12'                     },
+};
+
+// Карточки тарифов (Solo). Оптимальный — одна карточка-группа
+// owns: для каких типов организации доступна карточка
+const TARIFF_CARDS = [
+  {
+    id: 'optimal', name: 'Оптимальный', sub: 'Любая СНО, 4 направления',
+    owns: ['ul','ip'],
+    durations: [
+      { id: 'opt12', label: '12 мес' },
+      { id: 'opt24', label: '24 мес' },
+    ]
+  },
+  { id: 'tre_o', name: 'Базовый',    sub: 'Любая СНО, 3 направления · 12 мес',  owns: ['ul']       },
+  { id: 'tre_s', name: 'Упрощенный', sub: 'Спецрежимы, 3 направления · 12 мес', owns: ['ul','ip']  },
+  { id: 'uno',   name: 'Минимальный',sub: 'Любая СНО, 1 направление · 12 мес',  owns: ['ul','ip']  },
+  { id: 'zero',  name: 'Нулёвка',    sub: 'Любая СНО, 4 направления, нулевая отчетность в ФНС · 12 мес',        owns: ['ul','ip']  },
+];
+
+const GK_RANGES = [
+  { min: 3,  max: 5,        ip: 'ГК ИП/ФЛ', ul: 'ГК ЮЛ'   },
+  { min: 6,  max: 10,       ip: 'Column18',  ul: 'Column24' },
+  { min: 11, max: 15,       ip: 'Column19',  ul: 'Column25' },
+  { min: 16, max: 25,       ip: 'Column20',  ul: 'Column26' },
+  { min: 26, max: 50,       ip: 'Column21',  ul: 'Column27' },
+  { min: 51, max: Infinity, ip: 'Column22',  ul: 'Column28' },
+];
+
+const EXT_DEFS = [
+  { field: 'extIp',    col: 'Расширения', label: 'Доп. направление ИП/ФЛ' },
+  { field: 'extUl',    col: 'Column30',   label: 'Доп. направление ЮЛ'    },
+  { field: 'extIfns',  col: 'Column31',   label: 'Доп. ИФНС'              },
+  { field: 'extStat',  col: 'Column32',   label: 'Доп. Росстат'           },
+  { field: 'extFsrar', col: 'Column33',   label: 'ФСРАР'                  },
+];
+
+// Глобальные расширения (Solo/UB)
+const GLOBAL_EXT = [
+  { id: 'ao5-ext-ip',    col: 'Расширения', label: 'Доп. направление (ИП/ФЛ)' },
+  { id: 'ao5-ext-ul',    col: 'Column30',   label: 'Доп. направление (ЮЛ)'    },
+  { id: 'ao5-ext-ifns',  col: 'Column31',   label: 'Доп. ИФНС'                },
+  { id: 'ao5-ext-stat',  col: 'Column32',   label: 'Доп. Росстат'             },
+  { id: 'ao5-ext-fsrar', col: 'Column33',   label: 'ФСРАР'                    },
+];
+
+// ── Данные ────────────────────────────────────────────────────────────────
+let DATA = [], DMAP = {};
+
+// ── Состояние ─────────────────────────────────────────────────────────────
+const S = {
+  top:    'solo',
+  gkMode: 'fast',
+  // solo: cardId=базовый id карточки, durId=конкретный тариф (null = не выбран)
+  solo: { reg: '', own: 'ul', cardId: null, durId: null },
+  fast: { rows: [{ id: 1, reg: '', ul: 1, ip: 0 }] },
+  det:  { cards: [newDetCard()], exist: 0 },
+  ub:   { reg: '', reports: 0, billing: 'quarter', applyMinFirstQ: true },
+  extraServices: { rows: [newExtraServiceRow()] },
+};
+
+function newDetCard() {
+  return { id: Date.now() + Math.random(), name: '', inn: '', reg: '', own: 'ul',
+           extIp: 0, extUl: 0, extIfns: 0, extStat: 0, extFsrar: 0, extOpen: false };
+}
+
+function newExtraServiceRow() {
+  return { id: Date.now() + Math.random(), name: '', qty: 0, price: 0 };
+}
+
+// Helpers
+const fmt = v => Math.round(v).toLocaleString('ru-RU') + ' ₽';
+const $   = id => document.getElementById(id);
+const p   = (row, key) => key && row ? (parseInt(row[key]) || 0) : 0;
+const ownLabel = own => own === 'ul' ? 'ЮЛ' : 'ИП';
+
+function tariffPrice(row, tariffId, own) {
+  const col = TARIFF_MAP[tariffId] && TARIFF_MAP[tariffId][own];
+  return p(row, col);
+}
+
+function gkRange(n) { return GK_RANGES.find(function(r){ return n >= r.min && n <= r.max; }); }
+function gkLabel(n) { const r = gkRange(n); if(!r) return ''; return r.max===Infinity ? r.min+'+' : r.min+'?'+r.max; }
+
+function sortedRegions() {
+  return DATA.slice().sort(function(a, b){
+    var aName = String((a && a.Column2) || '');
+    var bName = String((b && b.Column2) || '');
+    var aLow = aName.toLowerCase();
+    var bLow = bName.toLowerCase();
+    var aRank = aLow.indexOf('москва') !== -1 ? 0 : (aLow.indexOf('санкт-петербург') !== -1 ? 1 : 2);
+    var bRank = bLow.indexOf('москва') !== -1 ? 0 : (bLow.indexOf('санкт-петербург') !== -1 ? 1 : 2);
+    if (aRank !== bRank) return aRank - bRank;
+    return aName.localeCompare(bName, 'ru', { sensitivity: 'base' });
+  });
+}
+
+function buildRegSelect(selVal, onChange) {
+  selVal = selVal || '';
+  var regions = sortedRegions();
+  var selectedName = '';
+  if (selVal) {
+    var selRow = regions.find(function(t){ return t.Column1 === selVal; });
+    if (selRow) selectedName = selRow.Column2;
+  }
+
+  var wrap = document.createElement('div');
+  wrap.className = 'reg-wrap';
+
+  var display = document.createElement('div');
+  display.className = 'reg-display' + (selVal ? '' : ' placeholder');
+  display.setAttribute('tabindex', '0');
+  var displayText = document.createElement('span');
+  displayText.textContent = selectedName || 'Выберите регион';
+  display.appendChild(displayText);
+
+  var dropdown = document.createElement('div');
+  dropdown.className = 'reg-dropdown';
+
+  var searchWrap = document.createElement('div');
+  searchWrap.className = 'reg-search-wrap';
+  var searchInp = document.createElement('input');
+  searchInp.type = 'text';
+  searchInp.className = 'reg-search';
+  searchInp.placeholder = 'Поиск региона...';
+  searchWrap.appendChild(searchInp);
+
+  var list = document.createElement('div');
+  list.className = 'reg-list';
+
+  var noRes = document.createElement('div');
+  noRes.className = 'reg-opt no-results hidden';
+  noRes.textContent = 'Ничего не найдено';
+  list.appendChild(noRes);
+
+  regions.forEach(function(t){
+    var opt = document.createElement('div');
+    opt.className = 'reg-opt' + (t.Column1 === selVal ? ' selected' : '');
+    opt.dataset.val = t.Column1;
+    opt.textContent = t.Column2;
+    opt.onclick = function(){
+      selVal = t.Column1;
+      displayText.textContent = t.Column2;
+      display.classList.remove('placeholder');
+      list.querySelectorAll('.reg-opt').forEach(function(o){ o.classList.remove('selected'); });
+      opt.classList.add('selected');
+      closeDropdown();
+      onChange(t.Column1);
+    };
+    list.appendChild(opt);
+  });
+
+  dropdown.appendChild(searchWrap);
+  dropdown.appendChild(list);
+  wrap.appendChild(display);
+  wrap.appendChild(dropdown);
+
+  function openDropdown() {
+    wrap.classList.add('open');
+    searchInp.value = '';
+    filterList('');
+    var sel = list.querySelector('.selected');
+    if (sel) setTimeout(function(){ sel.scrollIntoView({ block: 'nearest' }); }, 0);
+    setTimeout(function(){ searchInp.focus(); }, 0);
+  }
+  function closeDropdown() {
+    wrap.classList.remove('open');
+  }
+  function filterList(q) {
+    q = q.toLowerCase();
+    var opts = list.querySelectorAll('.reg-opt:not(.no-results)');
+    var visible = 0;
+    opts.forEach(function(o){
+      var match = o.textContent.toLowerCase().indexOf(q) !== -1;
+      o.classList.toggle('hidden', !match);
+      if (match) visible++;
+    });
+    noRes.classList.toggle('hidden', visible > 0);
+  }
+
+  display.onclick = function(){ wrap.classList.contains('open') ? closeDropdown() : openDropdown(); };
+  display.onkeydown = function(e){
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDropdown(); }
+    if (e.key === 'Escape') closeDropdown();
+  };
+  searchInp.oninput = function(){ filterList(searchInp.value); };
+  searchInp.onkeydown = function(e){ if (e.key === 'Escape') closeDropdown(); };
+
+  document.addEventListener('click', function(e){
+    if (!wrap.contains(e.target)) closeDropdown();
+  });
+
+  return wrap;
+}
+
+// Эффективный tariffId для Solo: если карточка с вариантами — durId, иначе cardId
+function soloEffId() {
+  if (!S.solo.cardId) return null;
+  const card = TARIFF_CARDS.find(function(c){ return c.id === S.solo.cardId; });
+  if (card && card.durations) return S.solo.durId; // null если срок не выбран
+  return S.solo.cardId;
+}
+
+// ── Загрузка ──────────────────────────────────────────────────────────────
+async function loadData() {
+  try {
+    if (window.__CALC_PRELOAD_PRICES_PROMISE) {
+      try { await window.__CALC_PRELOAD_PRICES_PROMISE; } catch(e) {}
+    }
+
+    var preloaded = window.__CALC_PRELOADED_DATA && window.__CALC_PRELOADED_DATA.ao5;
+    var loaded = false;
+
+    function parseAo5Data(raw) {
+      if (!raw) return null;
+      if (Array.isArray(raw)) return raw;
+      if (typeof raw === 'object') return [raw];
+      return null;
+    }
+
+    function scriptBaseUrl() {
+      var script = Array.from(document.scripts).find(function(s){
+        return /(?:ao5-calc|app)\.js(?:$|\?)/i.test(s.src || '');
+      });
+      if (!script || !script.src) return null;
+      try { return new URL('.', script.src); } catch(e) { return null; }
+    }
+
+    function candidateUrls() {
+      var names = (window.__CALC_APP_RESOURCES && window.__CALC_APP_RESOURCES.prices && window.__CALC_APP_RESOURCES.prices.ao5) || ['ao5-tariffs.json'];
+      var urls = [];
+      names.forEach(function(name){
+        urls.push(name);
+        urls.push('./' + name);
+        urls.push(encodeURI(name));
+        urls.push('./' + encodeURI(name));
+      });
+      var base = scriptBaseUrl();
+      if (base) {
+        names.forEach(function(name){
+          urls.push(new URL(name, base).href);
+          urls.push(new URL(encodeURI(name), base).href);
+        });
+      }
+      return Array.from(new Set(urls));
+    }
+
+    var parsed = parseAo5Data(preloaded);
+    if (parsed && parsed.length) {
+      DATA = parsed.filter(function(t){ return t && t.Column1 && /^\d/.test(String(t.Column1)); });
+      DMAP = Object.fromEntries(DATA.map(function(t){ return [t.Column1, t]; }));
+      loaded = true;
+    } else {
+      var urls = candidateUrls();
+      for (var i = 0; i < urls.length; i++) {
+        try {
+          var res = await fetch(urls[i], { cache: 'no-store' });
+          if (!res.ok) continue;
+          var text = await res.text();
+          var trimmed = (text || '').trim();
+          var asArray;
+          try {
+            asArray = JSON.parse('[' + trimmed + ']');
+          } catch(e1) {
+            try {
+              asArray = JSON.parse(trimmed);
+            } catch(e2) {
+              asArray = JSON.parse('[' + trimmed.replace(/}\s*,?\s*{/g, '},{') + ']');
+            }
+          }
+          parsed = parseAo5Data(asArray);
+          if (parsed && parsed.length) {
+            DATA = parsed.filter(function(t){ return t && t.Column1 && /^\d/.test(String(t.Column1)); });
+            DMAP = Object.fromEntries(DATA.map(function(t){ return [t.Column1, t]; }));
+            loaded = true;
+            break;
+          }
+        } catch(e) {}
+      }
+    }
+
+    if (!loaded) {
+      throw new Error('файл цен не найден по доступным путям');
+    }
+
+    var lm = $('ao5-loading-msg'); if(lm) lm.remove();
+    $('ao5-addons-wrap').style.display = '';
+    $('ao5-btn-pdf').disabled = false;
+
+    ['ao5-c-org','ao5-c-name','ao5-c-client','ao5-c-phone','ao5-c-email'].forEach(function(id){
+      var el=$(id), sv=localStorage.getItem('ao5_'+id);
+      if(sv && el) el.value=sv;
+      if(el) el.oninput=function(e){ localStorage.setItem('ao5_'+id, e.target.value); };
+    });
+    render();
+  } catch(e) {
+    $('ao5-loading-msg').textContent = '❌ Ошибка загрузки: '+e.message;
+    console.error(e);
+  }
+}
+
+// Render
+function render() {
+  var dyn = $('ao5-dyn'); dyn.innerHTML = '';
+  if      (S.top==='solo') renderSolo(dyn);
+  else if (S.top==='gk')   renderGK(dyn);
+  else                     renderUB(dyn);
+  renderExtraServicesRows();
+  calc();
+}
+
+// Solo
+function renderSolo(dyn) {
+  var n = $('ao5-tpl-solo').content.cloneNode(true);
+  // Заменяем нативный select на кастомный с поиском
+  var regSel = n.getElementById('ao5-sol-reg');
+  var regWrap = buildRegSelect(S.solo.reg, function(val){
+    S.solo.reg = val; refreshTariffCards(); refreshAddonRows(); calc();
+  });
+  regSel.parentNode.replaceChild(regWrap, regSel);
+  n.querySelectorAll('#ao5-sol-own .tb').forEach(function(b){
+    b.classList.toggle('active', b.dataset.v===S.solo.own);
+    b.onclick=function(){
+      S.solo.own=b.dataset.v;
+      // Если выбранная карточка недоступна для нового типа — сбрасываем
+      if (S.solo.cardId) {
+        var card=TARIFF_CARDS.find(function(c){ return c.id===S.solo.cardId; });
+        if (!card || !card.owns.includes(S.solo.own)) { S.solo.cardId=null; S.solo.durId=null; }
+      }
+      document.querySelectorAll('#ao5-sol-own .tb').forEach(function(x){ x.classList.toggle('active',x.dataset.v===S.solo.own); });
+      refreshTariffCards(); refreshAddonRows(); calc();
+    };
+  });
+  dyn.appendChild(n);
+  refreshTariffCards();
+  refreshAddonRows();
+}
+
+// Скрывает/показывает строки доп. расширений в зависимости от типа организации (Solo)
+function refreshAddonRows() {
+  if (S.top !== 'solo') return;
+  var rowIp = document.getElementById('ao5-vrow-ext-ip');
+  var rowUl = document.getElementById('ao5-vrow-ext-ul');
+  if (rowIp) rowIp.style.display = S.solo.own === 'ip' ? '' : 'none';
+  if (rowUl) rowUl.style.display = S.solo.own === 'ul' ? '' : 'none';
+}
+
+function renderExtraServicesRows() {
+  var list = $('ao5-extra-services-list');
+  if (!list) return;
+  list.innerHTML = '';
+  S.extraServices.rows.forEach(function(row){
+    var wrap = document.createElement('div');
+    wrap.className = 'extra-service-grid extra-service-row';
+    wrap.innerHTML =
+      '<input type="text" class="extra-service-input" placeholder="Наименование услуги">' +
+      '<input type="number" class="extra-service-input" min="0" placeholder="0">' +
+      '<input type="number" class="extra-service-input" min="0" placeholder="0">' +
+      '<button type="button" class="extra-service-remove-btn">Удалить</button>';
+    var nameInp = wrap.children[0];
+    var qtyInp = wrap.children[1];
+    var priceInp = wrap.children[2];
+    var rmBtn = wrap.children[3];
+    nameInp.value = row.name || '';
+    qtyInp.value = row.qty || '';
+    priceInp.value = row.price || '';
+    nameInp.oninput = function(e){ row.name = e.target.value || ''; calc(); };
+    qtyInp.oninput = function(e){ row.qty = parseInt(e.target.value, 10) || 0; calc(); };
+    priceInp.oninput = function(e){ row.price = parseInt(e.target.value, 10) || 0; calc(); };
+    rmBtn.onclick = function(){ Ao5App.rmExtraService(row.id); };
+    list.appendChild(wrap);
+  });
+}
+
+function refreshTariffCards() {
+  var cont=$('ao5-sol-tariffs'); if(!cont) return;
+  var row=DMAP[S.solo.reg]||null;
+  var list=TARIFF_CARDS.filter(function(c){ return c.owns.includes(S.solo.own); });
+
+  cont.innerHTML = list.map(function(card){
+    var isActive = S.solo.cardId === card.id;
+
+    // Цена: для карточки без вариантов — одна цена; для Оптимального — «от … до …»
+    var priceHtml = '';
+    if (card.durations) {
+      if (!row) {
+        priceHtml = '<div class="tc-price no-reg">выберите регион</div>';
+      } else {
+        var prices = card.durations.map(function(d){ return tariffPrice(row,d.id,S.solo.own); }).filter(function(v){ return v>0; });
+        if (!prices.length) {
+          priceHtml='<div class="tc-price no-reg">нет цены</div>';
+        } else {
+          var mn=Math.min.apply(null,prices), mx=Math.max.apply(null,prices);
+          priceHtml = mn===mx
+            ? '<div class="tc-price">'+fmt(mn)+'</div>'
+            : '<div class="tc-price">от '+fmt(mn)+'<span class="tc-price-to"> до '+fmt(mx)+'</span></div>';
+        }
+      }
+    } else {
+      var pr = row ? tariffPrice(row,card.id,S.solo.own) : 0;
+      priceHtml = '<div class="tc-price'+(pr?'':' no-reg')+'">'+(pr?fmt(pr):'выберите регион')+'</div>';
+    }
+
+    // Блок срока — только если карточка активна и есть варианты
+    var durBlock = '';
+    if (isActive && card.durations) {
+      durBlock = '<div class="tc-dur-wrap">' +
+        card.durations.map(function(d){
+          var pr2 = row ? tariffPrice(row,d.id,S.solo.own) : 0;
+          return '<div class="tc-dur-opt'+(S.solo.durId===d.id?' active':'')+'"'+
+            ' onclick="event.stopPropagation();Ao5App.selectDuration(\''+d.id+'\')">'+
+            '<span class="dur-m">'+d.label+'</span>'+
+            '<span class="dur-p">'+(pr2?fmt(pr2):'?')+'</span>'+
+            '</div>';
+        }).join('') +
+        '</div>';
+    }
+
+    return '<div class="tariff-card'+(isActive?' active':'')+'" onclick="Ao5App.selectCard(\''+card.id+'\')">'+
+      '<div class="tc-name">'+card.name+'</div>'+
+      '<div class="tc-sub">'+card.sub+'</div>'+
+      priceHtml+
+      durBlock+
+      '</div>';
+  }).join('');
+}
+
+// GK
+function renderGK(dyn) {
+  var n=$('ao5-tpl-gk').content.cloneNode(true);
+  dyn.appendChild(n);
+  document.querySelectorAll('#ao5-gk-tabs .inner-tab').forEach(function(b){
+    b.classList.toggle('active',b.dataset.m===S.gkMode);
+    b.onclick=function(){
+      S.gkMode=b.dataset.m;
+      document.querySelectorAll('#ao5-gk-tabs .inner-tab').forEach(function(x){ x.classList.toggle('active',x.dataset.m===S.gkMode); });
+      renderGKInner();
+    };
+  });
+  renderGKInner();
+}
+
+function renderGKInner() {
+  var inner=$('ao5-gk-inner'); if(!inner) return;
+  inner.innerHTML='';
+  if(S.gkMode==='fast') renderFast(inner);
+  else renderDetailed(inner, S.gkMode==='addon');
+  calc();
+}
+
+function renderFast(cont) {
+  var n=$('ao5-tpl-fast').content.cloneNode(true);
+  var tr=n.getElementById('ao5-gk-tariff-row'); if(tr) tr.style.display='none';
+
+  var rows=n.getElementById('ao5-fr-rows');
+  S.fast.rows.forEach(function(r){
+    var d=document.createElement('div'); d.className='ft-row';
+    var regWrap = buildRegSelect(r.reg, function(val){ Ao5App.updFast(r.id,'reg',val); });
+    var ulInp=document.createElement('input'); ulInp.type='number'; ulInp.value=r.ul; ulInp.min='0'; ulInp.placeholder='0';
+    ulInp.oninput=function(){ Ao5App.updFast(r.id,'ul',this.value); };
+    ulInp.onkeydown=function(e){ if(['-','e','E',',','.'].includes(e.key)) e.preventDefault(); };
+    var ipInp=document.createElement('input'); ipInp.type='number'; ipInp.value=r.ip; ipInp.min='0'; ipInp.placeholder='0';
+    ipInp.oninput=function(){ Ao5App.updFast(r.id,'ip',this.value); };
+    ipInp.onkeydown=function(e){ if(['-','e','E',',','.'].includes(e.key)) e.preventDefault(); };
+    var rmBtn=document.createElement('button'); rmBtn.className='btn-rm'; rmBtn.innerHTML='&times;';
+    rmBtn.onclick=function(){ Ao5App.rmFast(r.id); };
+    d.appendChild(regWrap); d.appendChild(ulInp); d.appendChild(ipInp); d.appendChild(rmBtn);
+    rows.appendChild(d);
+  });
+  n.getElementById('ao5-btn-add-fast').onclick=Ao5App.addFast;
+  cont.appendChild(n);
+}
+
+function renderDetailed(cont, showExist) {
+  var n=$('ao5-tpl-detailed').content.cloneNode(true);
+  if(showExist){ n.getElementById('ao5-ex-row').style.display='flex'; n.getElementById('ao5-ex-cnt').value=S.det.exist; }
+  var cards=n.getElementById('ao5-det-cards');
+
+  S.det.cards.forEach(function(c, idx){
+    var wrap=document.createElement('div'); wrap.className='cc'; wrap.dataset.cid=c.id;
+
+    // Кнопка удаления
+    if(idx>0){
+      var rb=document.createElement('button'); rb.className='cc-remove'; rb.innerHTML='&times;';
+      rb.style.display='flex';
+      rb.onclick=function(){ Ao5App.rmDet(c.id); };
+      wrap.appendChild(rb);
+    }
+
+    // Название + ИНН
+    var row1=document.createElement('div'); row1.className='g2'; row1.style.marginBottom='10px';
+    var inpName=document.createElement('input'); inpName.type='text'; inpName.className='cc-inner-input';
+    inpName.placeholder='Название компании'; inpName.value=c.name;
+    inpName.oninput=function(e){ var x=getCard(c.id); if(x) x.name=e.target.value; };
+    var inpInn=document.createElement('input'); inpInn.type='text'; inpInn.className='cc-inner-input';
+    inpInn.placeholder='ИНН'; inpInn.value=c.inn;
+    inpInn.oninput=function(e){ var x=getCard(c.id); if(x) x.inn=e.target.value; };
+    row1.appendChild(inpName); row1.appendChild(inpInn); wrap.appendChild(row1);
+
+    // Регион + ЮЛ/ИП
+    var row2=document.createElement('div'); row2.className='g2'; row2.style.marginBottom='10px';
+    var regWrap2=buildRegSelect(c.reg, (function(cid){ return function(val){ var x=getCard(cid); if(x){ x.reg=val; calc(); } }; })(c.id));
+    var tg=document.createElement('div'); tg.className='tg cc-own';
+    ['ul','ip'].forEach(function(v){
+      var b=document.createElement('button'); b.className='tb'+(c.own===v?' active':'');
+      b.dataset.v=v; b.textContent=v==='ul'?'ЮЛ':'ИП / ФЛ';
+      b.onclick=function(){ var x=getCard(c.id); if(!x) return; x.own=v; renderGKInner(); };
+      tg.appendChild(b);
+    });
+    row2.appendChild(regWrap2); row2.appendChild(tg); wrap.appendChild(row2);
+
+    // Доп. направления — раскрывающийся блок
+    var extBtn=document.createElement('button'); extBtn.className='cc-ext-toggle';
+    extBtn.type='button';
+    extBtn.innerHTML=(c.extOpen?'▾':'▸')+' Доп. направления';
+    var extBody=document.createElement('div'); extBody.className='cc-ext-body'+(c.extOpen?' open':'');
+    extBtn.onclick=function(){
+      var x=getCard(c.id); if(!x) return;
+      x.extOpen=!x.extOpen;
+      extBtn.innerHTML=(x.extOpen?'▾':'▸')+' Доп. направления';
+      extBody.classList.toggle('open', x.extOpen);
+    };
+
+    var extGrid=document.createElement('div'); extGrid.className='cc-ext-grid';
+    EXT_DEFS.forEach(function(ef){
+      var row3=document.createElement('div'); row3.className='cc-ext-row';
+      var sp=document.createElement('span'); sp.textContent=ef.label;
+      var inp=document.createElement('input'); inp.type='number'; inp.min='0'; inp.placeholder='0';
+      inp.value=c[ef.field]||0;
+      inp.onkeydown=function(e){ if(['-','e','E',',','.'].includes(e.key)) e.preventDefault(); };
+      inp.oninput=(function(field){ return function(e){ var x=getCard(c.id); if(x){ x[field]=parseInt(e.target.value)||0; calc(); } }; })(ef.field);
+      row3.appendChild(sp); row3.appendChild(inp);
+      extGrid.appendChild(row3);
+    });
+    extBody.appendChild(extGrid);
+    wrap.appendChild(extBtn); wrap.appendChild(extBody);
+
+    cards.appendChild(wrap);
+  });
+
+  n.getElementById('ao5-btn-add-det').onclick=Ao5App.addDet;
+  cont.appendChild(n);
+}
+
+function getCard(id){ return S.det.cards.find(function(c){ return c.id===id; }); }
+
+// ── УБ ────────────────────────────────────────────────────────────────────
+function renderUB(dyn) {
+  var n=$('ao5-tpl-ub').content.cloneNode(true);
+  var ubRegSel = n.getElementById('ao5-ub-reg');
+  var ubRegWrap = buildRegSelect(S.ub.reg, function(val){ S.ub.reg = val; calc(); });
+  ubRegSel.parentNode.replaceChild(ubRegWrap, ubRegSel);
+
+  var ubOrgs = n.getElementById('ao5-ub-orgs');
+  if (ubOrgs) {
+    var orgRow = ubOrgs.closest('.frow');
+    if (orgRow && orgRow.parentNode) orgRow.parentNode.removeChild(orgRow);
+  }
+
+  var ubReports = n.getElementById('ao5-ub-reports');
+  if (ubReports) {
+    var repRow = ubReports.closest('.frow');
+    var repLabel = repRow ? repRow.querySelector('label') : null;
+    if (repLabel) repLabel.textContent = 'Количество отчётов в квартал';
+  }
+  n.getElementById('ao5-ub-reports').value=S.ub.reports;
+  n.getElementById('ao5-ub-reports').oninput=function(e){ S.ub.reports=parseInt(e.target.value)||0; calc(); };
+  dyn.appendChild(n);
+
+  var ubTabsWrap = document.getElementById('ao5-ub-billing-tabs');
+  if (ubTabsWrap) {
+    var ubBtns = ubTabsWrap.querySelectorAll('.ub-billing-btn');
+    ubBtns.forEach(function(btn){
+      btn.classList.toggle('active', btn.dataset.v === S.ub.billing);
+      btn.onclick = function(){
+        S.ub.billing = btn.dataset.v;
+        ubBtns.forEach(function(b2){
+          b2.classList.toggle('active', b2.dataset.v === S.ub.billing);
+        });
+        calc();
+      };
+    });
+  }
+  var minPay = document.getElementById('ao5-ub-minpay');
+  if (minPay) {
+    minPay.checked = !!S.ub.applyMinFirstQ;
+    minPay.onchange = function(e){ S.ub.applyMinFirstQ = !!e.target.checked; calc(); };
+  }
+}
+
+// Calc
+function calc() {
+  var priceEl=$('ao5-r-price'), discEl=$('ao5-r-disc'), detailEl=$('ao5-det-body');
+  if(!priceEl) return;
+
+  var total=0, lines=[], gkBase=0, gkDisc=0, baseTotal=0;
+
+  if(S.top==='solo'){
+    discEl.textContent='';
+    var row=DMAP[S.solo.reg];
+    var effId=soloEffId();
+    if(row && effId){
+      var pr=tariffPrice(row,effId,S.solo.own);
+      if(pr){
+        total+=pr;
+        baseTotal=pr;
+        var card=TARIFF_CARDS.find(function(c){ return c.id===S.solo.cardId; });
+        var durOpt=card&&card.durations&&card.durations.find(function(d){ return d.id===effId; });
+        var tName=card?(card.name + (card.sub ? ' ' + card.sub : '')):effId;
+        var durLbl=durOpt?' В· '+durOpt.label:'';
+        lines.push(tName+durLbl+' | '+ownLabel(S.solo.own)+' | '+row.Column2+' | '+fmt(pr));
+      } else {
+        lines.push('Выбранный тариф недоступен для данного типа организации.');
+      }
+    } else if(!S.solo.cardId){
+      lines.push('Выберите тариф для расчёта.');
+    } else if(!row){
+      lines.push('Выберите регион.');
+    } else {
+      lines.push('Выберите срок тарифа.');
+    }
+
+  } else if(S.top==='gk'){
+    var cnt=
+      S.gkMode==='addon' ? S.det.exist+S.det.cards.length :
+      S.gkMode==='fast'  ? S.fast.rows.reduce(function(a,r){ return a+(r.ul||0)+(r.ip||0); },0) :
+                           S.det.cards.length;
+
+    if(cnt<3){
+      detailEl.innerText='Нужно минимум 3 организации.';
+      priceEl.textContent='Мин. 3 орг.'; discEl.textContent=''; return;
+    }
+    var keys=gkRange(cnt);
+    if(!keys){ detailEl.innerText='Ошибка диапазона ГК.'; return; }
+    var rangeLbl='ГК '+gkLabel(cnt)+' орг.';
+
+    if(S.gkMode==='fast'){
+      S.fast.rows.forEach(function(r){
+        var row2=DMAP[r.reg]; if(!row2) return;
+        if(r.ul>0){ var gp=p(row2,keys.ul); total+=gp*r.ul; gkDisc+=gp*r.ul; lines.push('ЮЛ · '+row2.Column2+' | '+rangeLbl+' | '+fmt(gp)+' × '+r.ul+' = '+fmt(gp*r.ul)); }
+        if(r.ip>0){ var gp2=p(row2,keys.ip); total+=gp2*r.ip; gkDisc+=gp2*r.ip; lines.push('ИП · '+row2.Column2+' | '+rangeLbl+' | '+fmt(gp2)+' × '+r.ip+' = '+fmt(gp2*r.ip)); }
+      });
+    } else {
+      S.det.cards.forEach(function(c){
+        var row3=DMAP[c.reg]; if(!row3) return;
+        var gp3=p(row3,keys[c.own]); total+=gp3; gkDisc+=gp3;
+        var lbl=c.name||'Организация';
+        lines.push(lbl+' | '+ownLabel(c.own)+' В· '+row3.Column2+' | '+rangeLbl+' | '+fmt(gp3));
+        EXT_DEFS.forEach(function(ef){
+          var cnt2=c[ef.field]||0; if(!cnt2) return;
+          var pr2=p(row3,ef.col); total+=pr2*cnt2;
+          lines.push('  ↳ '+ef.label+' | '+fmt(pr2)+' × '+cnt2+' = '+fmt(pr2*cnt2));
+        });
+      });
+    }
+    var pct=gkBase>0?Math.round(((gkBase-gkDisc)/gkBase)*100):0;
+    discEl.textContent=pct>0?'Скидка ГК: '+pct+'%':'';
+    baseTotal=gkDisc;
+
+  } else {
+    discEl.textContent='';
+    var ubRow=DMAP[S.ub.reg];
+    if(ubRow){
+      var lic=p(ubRow,'Уполномоченная бухгалтерия');
+      total+=lic;
+      baseTotal=lic;
+      lines.push('Лицензия УБ (в год) · '+ubRow.Column2+' | '+fmt(lic));
+      var rc=S.ub.reports||0;
+      if(rc>0){
+        var rk=rc<=200?'Column35':rc<=500?'Column36':rc<=1000?'Column37':'Column38';
+        var rate=p(ubRow,rk), minP=p(ubRow,'Column39'), rawFeeQ=rate*rc;
+        var firstQuarterFee = S.ub.applyMinFirstQ ? Math.max(rawFeeQ,minP) : rawFeeQ;
+        var regularQuarterFee = Math.max(rawFeeQ,minP);
+        var reportsFee = S.ub.billing==='year' ? (firstQuarterFee + regularQuarterFee * 3) : firstQuarterFee;
+        var minNote=(S.ub.applyMinFirstQ&&minP>0&&rawFeeQ<minP)?' (мин платеж)':'';
+        total+=reportsFee;
+        var reportsLine = S.ub.billing==='year'
+          ? ('Отправка отчётов (за год) · '+rc+' шт./квартал × 4 квартала × '+fmt(rate)+' | '+fmt(reportsFee))
+          : ('Отправка отчётов (за квартал) · '+rc+' шт. × '+fmt(rate)+' | '+fmt(reportsFee));
+        lines.push(reportsLine+minNote);
+      }
+      var info=$('ao5-ub-info');
+      if(info){
+        var r35=p(ubRow,'Column35'),r36=p(ubRow,'Column36'),r37=p(ubRow,'Column37'),r38=p(ubRow,'Column38'),r39=p(ubRow,'Column39');
+        info.style.display='';
+        info.innerHTML='<b>Ставки за отчёт (в квартал) · '+ubRow.Column2+':</b><br>'+
+          '1–200: <b>'+fmt(r35)+'</b>/отч. &nbsp;·&nbsp; 201–500: <b>'+fmt(r36)+'</b>/отч. &nbsp;·&nbsp; 501–1000: <b>'+fmt(r37)+'</b>/отч. &nbsp;·&nbsp; 1001+: <b>'+fmt(r38)+'</b>/отч.<br>'+
+          'Минимальный платёж: <b>'+fmt(r39)+'</b>/квартал';
+      }
+    } else {
+      lines.push('Выберите регион для расчёта.');
+      var info2=$('ao5-ub-info'); if(info2) info2.style.display='none';
+    }
+  }
+
+  // Глобальные расширения (Solo и UB, а также GK Fast)
+  if(S.top!=='gk' || S.gkMode==='fast'){
+    total+=calcGlobalExt(lines);
+  }
+
+  // Доп. скидка — применяется только к основной лицензии
+  var dv=parseFloat($('ao5-disc-val')&&$('ao5-disc-val').value)||0;
+  var dt=($('ao5-disc-type')&&$('ao5-disc-type').value)||'pct';
+  if(dv>0&&baseTotal>0){
+    var da=dt==='pct'?baseTotal*(dv/100):Math.min(dv,baseTotal);
+    lines.push('\nДоп. скидка '+(dt==='pct'?dv+'%':'(руб)')+' | −'+fmt(da));
+    total=Math.max(0,total-da);
+  }
+
+  total += calcExtraServices(lines);
+
+  detailEl.innerText=lines.length?lines.join('\n'):'Введите данные для расчёта...';
+  priceEl.textContent=fmt(total);
+}
+
+function calcGlobalExt(lines){
+  if(!$('ao5-adn-ext')||!$('ao5-adn-ext').classList.contains('on')) return 0;
+  var regCode=S.top==='solo'?S.solo.reg:S.top==='ub'?S.ub.reg:(S.fast.rows[0]&&S.fast.rows[0].reg||'');
+  var row=DMAP[regCode]||null; var add=0;
+  GLOBAL_EXT.forEach(function(e){
+    var el=document.getElementById(e.id); var cnt=parseInt(el&&el.value)||0;
+    if(cnt>0){ var pr=p(row,e.col); add+=pr*cnt; lines.push(e.label+' | '+fmt(pr)+' × '+cnt+' = '+fmt(pr*cnt)); }
+  });
+  return add;
+}
+
+function calcExtraServices(lines){
+  if(!$('ao5-adn-extra')||!$('ao5-adn-extra').classList.contains('on')) return 0;
+  var total = 0;
+  S.extraServices.rows.forEach(function(row){
+    var name = (row.name || '').trim();
+    var qty = parseInt(row.qty, 10) || 0;
+    var price = parseInt(row.price, 10) || 0;
+    if(!name || qty <= 0 || price <= 0) return;
+    var sum = qty * price;
+    total += sum;
+    lines.push(name+' | '+fmt(price)+' × '+qty+' = '+fmt(sum));
+  });
+  return total;
+}
+
+// PDF
+function initPDF() {
+  var pdfBtn = $('ao5-btn-pdf');
+  if (!pdfBtn) return;
+  pdfBtn.onclick = async function() {
+    pdfBtn.disabled = true;
+    var originalText = pdfBtn.textContent;
+    pdfBtn.textContent = 'Формируем PDF...';
+    try {
+      await buildPDF();
+    } catch (e) {
+      console.error('Ошибка PDF:', e);
+      alert('Ошибка PDF: ' + e.message);
+    } finally {
+      pdfBtn.disabled = false;
+      pdfBtn.textContent = originalText;
+    }
+  };
+}
+
+function escHtml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function getPdfAssets(mode) {
+  var assets = document.getElementById('ao5-calc-assets');
+  if (!assets) throw new Error('Не найден блок ассетов #ao5-calc-assets');
+  var prefix = mode === 'ub' ? 'ub' : 'main';
+  var headerSrc = assets.getAttribute('data-' + prefix + '-header-src') || '';
+  var footerSrcs = [];
+  for (var i = 1; i <= 7; i++) {
+    var src = assets.getAttribute('data-' + prefix + '-footer-src-' + i);
+    if (src) footerSrcs.push(src);
+  }
+  return { headerSrc: headerSrc, footerSrcs: footerSrcs };
+}
+
+async function buildPDF() {
+  var jsPDFClass = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+  if (!jsPDFClass) throw new Error('jsPDF не найден');
+  if (typeof html2canvas === 'undefined') throw new Error('html2canvas не найден');
+
+  var mode = S.top === 'ub' ? 'ub' : 'main';
+  var assets = getPdfAssets(mode);
+
+  var PAGE_W = 794;
+  var PAGE_H = 1122;
+  var PAD = 50;
+  var BOTTOM_PAD = 25;
+  var FOOTER_GAP = 25;
+  var ACCENT = '#008ec0';
+  var MF = "font-family:'Montserrat',sans-serif;box-sizing:border-box;";
+
+  var totalText = (($('ao5-r-price') && $('ao5-r-price').innerText) || '').trim();
+  var discText = (($('ao5-r-disc') && $('ao5-r-disc').innerText) || '').trim();
+  var clientName = (($('ao5-c-client') && $('ao5-c-client').value) || '').trim();
+  var partnerOrg = (($('ao5-c-org') && $('ao5-c-org').value) || '').trim();
+  var managerName = (($('ao5-c-name') && $('ao5-c-name').value) || '').trim();
+  var managerPhone = (($('ao5-c-phone') && $('ao5-c-phone').value) || '').trim();
+  var managerEmail = (($('ao5-c-email') && $('ao5-c-email').value) || '').trim();
+  var lines = ((($('ao5-det-body') && $('ao5-det-body').innerText) || '')
+    .split('\n')
+    .map(function(s){ return s.trim(); })
+    .filter(Boolean));
+
+
+  var waitImg = function(img) {
+    return new Promise(function(res) {
+      if (!img.src) return res();
+      if (img.complete && img.naturalHeight > 0) return res();
+      img.onload = img.onerror = res;
+    });
+  };
+  var mount = function(el) {
+    el.style.position = 'absolute';
+    el.style.top = '0';
+    el.style.left = '-9999px';
+    el.style.zIndex = '-1';
+    document.body.appendChild(el);
+  };
+  var unmount = function(el) {
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  };
+  var toCanvas = function(el) {
+    return html2canvas(el, {
+      scale: 5,
+      useCORS: true,
+      allowTaint: true,
+      logging: false,
+      width: PAGE_W,
+      windowWidth: PAGE_W
+    });
+  };
+  var measureHeight = function(html) {
+    var div = document.createElement('div');
+    div.style.cssText = 'width:' + PAGE_W + 'px;position:absolute;top:0;left:-9999px;visibility:hidden;';
+    div.innerHTML = html;
+    document.body.appendChild(div);
+    var h = div.getBoundingClientRect().height;
+    document.body.removeChild(div);
+    return h;
+  };
+
+  var rowHTML = function(line) {
+    if (line.indexOf('|') === -1) {
+      return '<tr><td colspan="2" style="padding:3px 0;font-size:9pt;color:#999;' + MF + '">' + escHtml(line) + '</td></tr>';
+    }
+    var parts = line.split('|').map(function(x){ return x.trim(); }).filter(Boolean);
+    if (!parts.length) return '';
+    var price = parts[parts.length - 1];
+    var label = parts.slice(0, -1).join(' | ');
+    return '<tr>' +
+      '<td style="padding:5px 0;border-bottom:1px solid #eee;font-size:9.5pt;color:#444;' + MF + '">' + escHtml(label) + '</td>' +
+      '<td style="padding:5px 0;border-bottom:1px solid #eee;text-align:right;font-weight:800;color:' + ACCENT + ';font-size:9.5pt;white-space:nowrap;' + MF + '">' + escHtml(price) + '</td>' +
+      '</tr>';
+  };
+
+  var summaryText = mode === 'ub'
+    ? 'Лицензия'
+    : (clientName ? 'Стоимость для ' + clientName + ':' : 'Итоговая стоимость:');
+
+  var summaryHTML = function() {
+    var disc = discText
+      ? '<div style="color:#2ca35c;font-size:11px;font-weight:800;margin-top:3px;">' + escHtml(discText) + '</div>'
+      : '';
+    return '<div style="background:#c9edf9;padding:15px 20px;border-radius:12px;text-align:center;margin-top:15px;' + MF + '">' +
+      '<div style="font-size:13px;color:#3e4a50;margin-bottom:5px;">' + escHtml(summaryText) + '</div>' +
+      '<div style="font-size:24px;line-height:1.1;font-weight:900;color:' + ACCENT + ';">' + escHtml(totalText) + '</div>' +
+      disc +
+      '</div>';
+  };
+
+  var contactHTML = function() {
+    var nm = managerName || 'Не указано';
+    var ph = managerPhone || '';
+    var em = managerEmail || '';
+    return '<div style="margin-top:10px;padding:15px 20px;border:1px solid #ddd;border-radius:14px;display:flex;align-items:center;justify-content:space-between;gap:16px;' + MF + '">' +
+      '<div style="flex:1;">' +
+        '<div style="font-size:16px;color:' + ACCENT + ';font-weight:900;line-height:1;">Ваш менеджер</div>' +
+        '<div style="font-size:13px;color:#333;font-weight:700;line-height:1.2;margin-top:2px;">' + escHtml(nm) + '</div>' +
+        (ph ? '<div style="font-size:13px;color:#333;line-height:1.2;">' + escHtml(ph) + '</div>' : '') +
+        (em ? '<div style="font-size:12px;color:#666;line-height:1.2;">' + escHtml(em) + '</div>' : '') +
+        (partnerOrg ? '<div style="font-size:12px;color:#666;line-height:1.2;">' + escHtml(partnerOrg) + '</div>' : '') +
+      '</div>' +
+      '<a class="pdf-service-link" href="https://astral.ru/products/astral-otchet-5-0/?utm_source=kp&utm_medium=clients" target="_blank" rel="noopener noreferrer" style="background:#b6e8f7;color:' + ACCENT + ';padding:8px 14px;border-radius:999px;font-size:13px;font-weight:800;white-space:nowrap;text-decoration:none;display:inline-block;">Подробнее о сервисе →</a>' +
+      '</div>';
+  };
+
+  var makeFooterImgsHTML = function(from, count, naturalSizes, scaleFactor) {
+    var contentWidth = PAGE_W - PAD * 2;
+    var footerScale = scaleFactor || 1;
+    var items = assets.footerSrcs.slice(from, from + count).map(function(src, idx) {
+      var nat = naturalSizes[from + idx];
+      var imgW = (nat && nat.w) ? Math.min(Math.round(nat.w / footerScale), contentWidth) : contentWidth;
+      var isLast = idx === count - 1;
+      return '<div style="margin-bottom:' + (isLast ? 0 : FOOTER_GAP) + 'px;">' +
+        '<img src="' + src + '" crossorigin="anonymous" style="display:block;width:' + imgW + 'px;height:auto;">' +
+        '</div>';
+    }).join('');
+    return '<div style="padding:0 ' + PAD + 'px;box-sizing:border-box;">' + items + '</div>';
+  };
+
+  var headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'width:' + PAGE_W + 'px;background:#fff;';
+  var headerNaturalW = PAGE_W;
+  if (assets.headerSrc) {
+    var headerImg = document.createElement('img');
+    headerImg.src = assets.headerSrc;
+    headerImg.style.cssText = 'width:' + PAGE_W + 'px;display:block;';
+    headerDiv.appendChild(headerImg);
+  }
+  mount(headerDiv);
+  await Promise.all(Array.from(headerDiv.querySelectorAll('img')).map(waitImg));
+  await new Promise(function(r){ setTimeout(r, 100); });
+  if (assets.headerSrc && headerDiv.querySelector('img')) {
+    var loadedHeader = headerDiv.querySelector('img');
+    if (loadedHeader && loadedHeader.naturalWidth) headerNaturalW = loadedHeader.naturalWidth;
+  }
+  var canvasHeader = await toCanvas(headerDiv);
+  unmount(headerDiv);
+  var headerH = Math.round(PAGE_W * canvasHeader.height / canvasHeader.width);
+  var ASSET_SCALE = headerNaturalW / PAGE_W;
+  if (!isFinite(ASSET_SCALE) || ASSET_SCALE < 1) ASSET_SCALE = 1;
+
+  var contentWidth = PAGE_W - PAD * 2;
+  var footerNaturalSizes = await Promise.all(assets.footerSrcs.map(function(src) {
+    return new Promise(function(res) {
+      var img = new Image();
+      img.onload = function(){ res({ w: img.naturalWidth, h: img.naturalHeight }); };
+      img.onerror = function(){ res({ w: 0, h: 0 }); };
+      img.src = src;
+    });
+  }));
+  var footerDisplayHeights = footerNaturalSizes.map(function(sz) {
+    if (!sz.w) return 0;
+    var dw = Math.min(Math.round(sz.w / ASSET_SCALE), contentWidth);
+    return Math.round(sz.h * dw / sz.w);
+  });
+
+  var titleH = measureHeight('<div style="padding:20px ' + PAD + 'px 0;' + MF + '"><h2 style="color:' + ACCENT + ';font-size:15px;margin:0 0 10px 0;font-weight:800;">Стоимость подключения:</h2></div>');
+
+  var rowHeights = lines.map(function(line) {
+    return measureHeight('<div style="width:' + PAGE_W + 'px;padding:0 ' + PAD + 'px;box-sizing:border-box;' + MF + '"><table style="width:100%;border-collapse:collapse;"><tbody>' + rowHTML(line) + '</tbody></table></div>');
+  });
+
+  var summaryOnlyHTML = '<div style="padding:0 ' + PAD + 'px 10px;' + MF + '">' + summaryHTML() + '</div>';
+  var contactOnlyHTML = '<div style="padding:0 ' + PAD + 'px 10px;' + MF + '">' + contactHTML() + '</div>';
+  var summaryBlockHTML = '<div style="padding:0 ' + PAD + 'px 10px;' + MF + '">' + summaryHTML() + contactHTML() + '</div>';
+
+  var summaryOnlyH = measureHeight(summaryOnlyHTML);
+  var contactOnlyH = measureHeight(contactOnlyHTML);
+  var summaryBlockH = summaryOnlyH + contactOnlyH;
+
+  var availableP1 = PAGE_H - headerH - 30;
+  var availableRest = PAGE_H - 30;
+  var pages = [];
+  var remaining = lines.slice();
+  var isFirstPage = true;
+
+  while (remaining.length > 0 || pages.length === 0) {
+    var available = isFirstPage ? availableP1 : availableRest;
+    var overhead = isFirstPage ? titleH : 30;
+    var used = overhead;
+    var pageLines = [];
+
+    for (var li = 0; li < remaining.length; li++) {
+      var rowIdx = lines.length - remaining.length + li;
+      if (used + rowHeights[rowIdx] <= available) {
+        used += rowHeights[rowIdx];
+        pageLines.push(remaining[li]);
+      } else {
+        break;
+      }
+    }
+    if (!pageLines.length && remaining.length) {
+      pageLines.push(remaining[0]);
+      used += rowHeights[lines.length - remaining.length];
+    }
+
+    remaining = remaining.slice(pageLines.length);
+    var isLast = remaining.length === 0;
+    var summaryOnThisPage = false;
+    if (isLast) {
+      if (used + summaryBlockH <= available) summaryOnThisPage = 'full';
+      else if (used + summaryOnlyH <= available) summaryOnThisPage = 'summary-only';
+    }
+
+    var addedH = summaryOnThisPage === 'full' ? summaryBlockH : (summaryOnThisPage === 'summary-only' ? summaryOnlyH : 0);
+    pages.push({ lines: pageLines, isFirst: isFirstPage, isLast: isLast, summaryOnThisPage: summaryOnThisPage, usedH: used + addedH });
+    isFirstPage = false;
+    if (isLast) break;
+  }
+
+  var lastPage = pages[pages.length - 1];
+  if (!lastPage.summaryOnThisPage) {
+    if (summaryBlockH + 30 <= availableRest) {
+      pages.push({ lines: [], isFirst: false, isLast: true, summaryOnThisPage: 'full', usedH: summaryBlockH + 30 });
+    } else {
+      pages.push({ lines: [], isFirst: false, isLast: false, summaryOnThisPage: 'summary-only', usedH: summaryOnlyH + 30 });
+      pages.push({ lines: [], isFirst: false, isLast: true, summaryOnThisPage: 'contact-only', usedH: contactOnlyH + 30 });
+    }
+  } else if (lastPage.summaryOnThisPage === 'summary-only') {
+    pages.push({ lines: [], isFirst: false, isLast: true, summaryOnThisPage: 'contact-only', usedH: contactOnlyH + 30 });
+  }
+
+  var finalPage = pages[pages.length - 1];
+  var availableForFooter = (finalPage.isFirst ? availableP1 : availableRest) - finalPage.usedH - BOTTOM_PAD;
+  var footerOnLastPage = 0;
+  var accumulated = 0;
+  for (var fi = 0; fi < footerDisplayHeights.length; fi++) {
+    if (!footerDisplayHeights[fi]) continue;
+    var gap = footerOnLastPage > 0 ? FOOTER_GAP : 0;
+    if (accumulated + gap + footerDisplayHeights[fi] <= availableForFooter) {
+      accumulated += gap + footerDisplayHeights[fi];
+      footerOnLastPage = fi + 1;
+    } else {
+      break;
+    }
+  }
+  var footerOnExtraPage = assets.footerSrcs.length - footerOnLastPage;
+
+  var canvases = [];
+  var linkRects = [];
+  for (var pi = 0; pi < pages.length; pi++) {
+    var pg = pages[pi];
+    var isLastPg = pi === pages.length - 1;
+    var div = document.createElement('div');
+    div.style.cssText = 'width:' + PAGE_W + 'px;background:#fff;';
+    var tableRows = pg.lines.map(rowHTML).join('');
+    var tableHTML = tableRows
+      ? '<div style="padding:' + (pg.isFirst ? '20px' : '30px') + ' ' + PAD + 'px 0;' + MF + '">' +
+          (pg.isFirst ? '<h2 style="color:' + ACCENT + ';font-size:15px;margin:0 0 10px 0;font-weight:800;">Стоимость подключения:</h2>' : '') +
+          '<table style="width:100%;border-collapse:collapse;"><tbody>' + tableRows + '</tbody></table>' +
+        '</div>'
+      : '';
+
+    var summaryRendered = '';
+    if (pg.summaryOnThisPage === 'full') summaryRendered = summaryBlockHTML;
+    else if (pg.summaryOnThisPage === 'summary-only') summaryRendered = summaryOnlyHTML;
+    else if (pg.summaryOnThisPage === 'contact-only') summaryRendered = contactOnlyHTML;
+
+    var footerHTML = (isLastPg && footerOnLastPage > 0)
+      ? '<div style="margin-top:' + BOTTOM_PAD + 'px;">' + makeFooterImgsHTML(0, footerOnLastPage, footerNaturalSizes, ASSET_SCALE) + '</div>'
+      : '';
+    div.innerHTML = tableHTML + summaryRendered + footerHTML;
+
+    mount(div);
+    await Promise.all(Array.from(div.querySelectorAll('img')).map(waitImg));
+    var linkRect = null;
+    var linkEl = div.querySelector('.pdf-service-link');
+    if (linkEl) {
+      var hostRect = div.getBoundingClientRect();
+      var anchorRect = linkEl.getBoundingClientRect();
+      linkRect = {
+        x: anchorRect.left - hostRect.left,
+        y: anchorRect.top - hostRect.top,
+        w: anchorRect.width,
+        h: anchorRect.height
+      };
+    }
+    await new Promise(function(r){ setTimeout(r, 150); });
+    var canvas = await toCanvas(div);
+    canvases.push(canvas);
+    linkRects.push(linkRect);
+    unmount(div);
+  }
+
+  var canvasExtraFooter = null;
+  if (footerOnExtraPage > 0) {
+    var divF = document.createElement('div');
+    divF.style.cssText = 'width:' + PAGE_W + 'px;background:#fff;padding-top:40px;box-sizing:border-box;';
+    divF.innerHTML = makeFooterImgsHTML(footerOnLastPage, footerOnExtraPage, footerNaturalSizes, ASSET_SCALE);
+    mount(divF);
+    await Promise.all(Array.from(divF.querySelectorAll('img')).map(waitImg));
+    await new Promise(function(r){ setTimeout(r, 150); });
+    canvasExtraFooter = await toCanvas(divF);
+    unmount(divF);
+  }
+
+  if (!canvases.length) throw new Error('Не удалось сформировать страницы PDF');
+  var pdf = new jsPDFClass({ unit: 'pt', format: 'a4', orientation: 'portrait' });
+  var PW = pdf.internal.pageSize.getWidth();
+  var addServiceLink = function(canvas, rectPx, yOffsetPt) {
+    if (!rectPx) return;
+    // rectPx измеряется в CSS-пикселях контейнера шириной PAGE_W
+    var k = PW / PAGE_W;
+    var x = rectPx.x * k;
+    var y = yOffsetPt + rectPx.y * k;
+    var w = rectPx.w * k;
+    var h = rectPx.h * k;
+    pdf.link(x, y, w, h, { url: 'https://astral.ru/products/astral-otchet-5-0/?utm_source=kp&utm_medium=clients' });
+  };
+  var headerHpt = PW * (canvasHeader.height / canvasHeader.width);
+  pdf.addImage(canvasHeader.toDataURL('image/jpeg', 1.0), 'JPEG', 0, 0, PW, headerHpt);
+  pdf.addImage(canvases[0].toDataURL('image/jpeg', 1.0), 'JPEG', 0, headerHpt, PW, PW * (canvases[0].height / canvases[0].width));
+  addServiceLink(canvases[0], linkRects[0], headerHpt);
+
+  for (var ci = 1; ci < canvases.length; ci++) {
+    pdf.addPage();
+    pdf.addImage(canvases[ci].toDataURL('image/jpeg', 1.0), 'JPEG', 0, 0, PW, PW * (canvases[ci].height / canvases[ci].width));
+    addServiceLink(canvases[ci], linkRects[ci], 0);
+  }
+
+  if (canvasExtraFooter) {
+    pdf.addPage();
+    pdf.addImage(canvasExtraFooter.toDataURL('image/jpeg', 1.0), 'JPEG', 0, 0, PW, PW * (canvasExtraFooter.height / canvasExtraFooter.width));
+  }
+
+  var safe = clientName.replace(/[^а-яёА-ЯЁa-zA-Z0-9 _-]/g, '').trim();
+  var modeName = mode === 'ub' ? 'УБ' : 'Обычное';
+  pdf.save(safe ? ('КП_АО5_' + modeName + '_' + safe + '.pdf') : ('КП_АО5_' + modeName + '.pdf'));
+}
+
+// Public API
+var Ao5App = {
+  selectCard: function(cardId){
+    var card=TARIFF_CARDS.find(function(c){ return c.id===cardId; });
+    if(!card) return;
+    if(S.solo.cardId===cardId){
+      // Повторный клик — снять выбор
+      S.solo.cardId=null; S.solo.durId=null;
+    } else {
+      S.solo.cardId=cardId;
+      // Если нет вариантов — durId не нужен; если есть — сбрасываем до явного выбора
+      S.solo.durId = card.durations ? (S.solo.durId||null) : null;
+    }
+    refreshTariffCards(); calc();
+  },
+  selectDuration: function(durId){
+    S.solo.durId=durId;
+    refreshTariffCards(); calc();
+  },
+  addFast: function(){ S.fast.rows.push({id:Date.now(),reg:'',ul:1,ip:0}); renderGKInner(); },
+  rmFast:  function(id){ if(S.fast.rows.length>1){ S.fast.rows=S.fast.rows.filter(function(x){ return x.id!==id; }); renderGKInner(); } },
+  updFast: function(id,f,v){ var r=S.fast.rows.find(function(x){ return x.id===id; }); if(r) r[f]=f==='reg'?v:(parseInt(v)||0); calc(); },
+  addDet:  function(){ S.det.cards.push(newDetCard()); renderGKInner(); },
+  rmDet:   function(id){ if(S.det.cards.length>1){ S.det.cards=S.det.cards.filter(function(x){ return x.id!==id; }); renderGKInner(); } },
+  addExtraService: function(){ S.extraServices.rows.push(newExtraServiceRow()); renderExtraServicesRows(); calc(); },
+  rmExtraService: function(id){
+    if(S.extraServices.rows.length>1){
+      S.extraServices.rows=S.extraServices.rows.filter(function(x){ return x.id!==id; });
+    } else {
+      S.extraServices.rows[0] = newExtraServiceRow();
+    }
+    renderExtraServicesRows();
+    calc();
+  },
+  toggleAddon: function(id){ document.getElementById(id).classList.toggle('on'); calc(); },
+  setExist: function(n){ S.det.exist=n; calc(); },
+  calc: calc,
+};
+window.Ao5App=Ao5App;
+
+// Init
+function initAo5(){
+  document.querySelectorAll('.top-tab').forEach(function(b){
+    b.onclick=function(){
+      document.querySelectorAll('.top-tab').forEach(function(x){ x.classList.remove('active'); });
+      b.classList.add('active'); S.top=b.dataset.top; render(); refreshAddonRows();
+    };
+  });
+  initPDF();
+  loadData();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initAo5);
+} else {
+  initAo5();
+}
+
+})();
+
+
+
+
+
+
+
